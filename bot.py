@@ -24,8 +24,8 @@ MEMBER_ROLE_ID = 1411938410041708585
 MOD_LOG_CHANNEL_ID = 1413297073348018299
 
 # Channels to monitor (leave [] to monitor all)
-MONITORED_CHANNEL_IDS = [1411930067994411139, 1411930091109224479, 
-                         1411930638260502638, 1411930689460240395, 
+MONITORED_CHANNEL_IDS = [1411930067994411139, 1411930091109224479,
+                         1411930638260502638, 1411930689460240395,
                          1411931034026643476]
 
 # YouTube (WebSub push)
@@ -34,10 +34,10 @@ YT_ANNOUNCE_CHANNEL_ID = 1412144563144888452
 YT_PING_ROLE_ID = 1412989373556850829
 YT_CALLBACK_PATH = "/yt/webhook"
 YT_HUB = "https://pubsubhubbub.appspot.com"
-YT_SECRET = "mutapapa-youtube"   # random string for HMAC (optional)
+YT_SECRET = "mutapapa-youtube"   # optional HMAC secret
 
-# Hosted banner URL (upload to Discord, copy link that ends in .png/.jpg)
-BANNER_URL = "https://cdn.discordapp.com/attachments/.../banner.png"
+# Hosted banner URL
+BANNER_URL = "https://cdn.discordapp.com/attachments/1411930091109224479/1413654925602459769/Welcome_to_the_Mutapapa_Official_Discord_Server_Image.png?ex=68bcb83e&is=68bb66be&hm=f248257c26608d0ee69b8baab82f62aea768f15f090ad318617e68350fe3b5ac&"
 # ========================================================
 
 DATA_FILE = "join_times.json"
@@ -122,7 +122,12 @@ async def yt_webhook_handler(request: web.Request):
             ch = guild.get_channel(YT_ANNOUNCE_CHANNEL_ID)
             role = guild.get_role(YT_PING_ROLE_ID)
             if ch and role:
-                embed = discord.Embed(title=title or "New upload!", url=f"https://youtu.be/{vid}", description="A new video just dropped 🔔", color=0xE62117)
+                embed = discord.Embed(
+                    title=title or "New upload!",
+                    url=f"https://youtu.be/{vid}",
+                    description="A new video just dropped 🔔",
+                    color=0xE62117
+                )
                 embed.set_image(url=f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg")
                 allowed = discord.AllowedMentions(roles=True, users=False, everyone=False)
                 await ch.send(content=role.mention, embed=embed, allowed_mentions=allowed)
@@ -130,7 +135,10 @@ async def yt_webhook_handler(request: web.Request):
 
     return web.Response(text="ok")
 
-app.add_routes([web.get(YT_CALLBACK_PATH, yt_webhook_handler), web.post(YT_CALLBACK_PATH, yt_webhook_handler)])
+app.add_routes([
+    web.get(YT_CALLBACK_PATH, yt_webhook_handler),
+    web.post(YT_CALLBACK_PATH, yt_webhook_handler)
+])
 runner = web.AppRunner(app)
 
 async def start_webserver():
@@ -175,7 +183,11 @@ async def on_message(message: discord.Message):
     if message.content.strip().lower() == "!modlogtest":
         ch = message.guild.get_channel(MOD_LOG_CHANNEL_ID)
         if ch:
-            e = discord.Embed(title="Mod-log test",description=f"Triggered by {message.author.mention} in {message.channel.mention}",color=0x2ECC71)
+            e = discord.Embed(
+                title="Mod-log test",
+                description=f"Triggered by {message.author.mention} in {message.channel.mention}",
+                color=0x2ECC71
+            )
             e.timestamp = discord.utils.utcnow()
             e.set_footer(text=f"Channel ID: {message.channel.id}")
             await ch.send(embed=e)
@@ -209,9 +221,13 @@ async def on_message(message: discord.Message):
 
     modlog = message.guild.get_channel(MOD_LOG_CHANNEL_ID)
     if modlog:
-        embed = discord.Embed(title="⚠️ Possible Cross-Trading / Black-Market Activity",
-                              description=f"**User:** {message.author.mention} (`{message.author}`)\n**Channel:** {message.channel.mention}\n**Message:**\n{message.content[:1000]}",
-                              color=0xE67E22)
+        embed = discord.Embed(
+            title="⚠️ Possible Cross-Trading / Black-Market Activity",
+            description=(f"**User:** {message.author.mention} (`{message.author}`)\n"
+                         f"**Channel:** {message.channel.mention}\n"
+                         f"**Message:**\n{message.content[:1000]}"),
+            color=0xE67E22
+        )
         embed.add_field(name="Triggers", value=", ".join(sorted(hits))[:1024], inline=False)
         embed.add_field(name="Jump", value=f"[Go to message]({message.jump_url})", inline=False)
         embed.timestamp = discord.utils.utcnow()
@@ -231,11 +247,15 @@ async def on_member_join(member: discord.Member):
             print("❗ Cannot assign @Newcomer")
     join_times.setdefault(str(GUILD_ID), {})[str(member.id)] = datetime.now(timezone.utc).isoformat()
     save_data(join_times)
+
     channel = member.guild.get_channel(WELCOME_CHANNEL_ID)
     if channel:
-        embed = discord.Embed(title=f"Welcome to {member.guild.name}, {member.name}!",
-                              description=f"Hey {member.mention}! Welcome to the **Mutapapa Official Discord Server!** We hope you have a great time here!",
-                              color=0x89FF)
+        embed = discord.Embed(
+            title=f"Welcome to {member.guild.name}, {member.name}!",
+            description=(f"Hey {member.mention}! Welcome to the **Mutapapa Official Discord Server!** "
+                         f"We hope you have a great time here!"),
+            color=0x89FF
+        )
         embed.set_thumbnail(url=member.display_avatar.url)
         embed.set_image(url=BANNER_URL)
         await channel.send(embed=embed)
@@ -278,4 +298,4 @@ async def promote_loop():
         save_data(join_times)
 
 # ----------------- run bot -----------------
-bot.run(os.getenv("MTQxMzI3NjE2MjMxODE0MzUxOA.G5Utvu.SogxoXyOKtWEZWzNqM7OCaO1ya4FH8dGgkxnLM"))
+bot.run(os.getenv("DISCORD_TOKEN"))
