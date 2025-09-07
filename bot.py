@@ -183,7 +183,21 @@ intents.members = True
 bot = discord.Client(intents=intents)
 
 # ================== DB (Supabase Postgres via asyncpg) ==================
-DB_URL = os.getenv("SUPABASE_URL")
+from urllib.parse import urlparse
+
+DB_URL = os.getenv("SUPABASE_DB_URL", "").strip()
+if not DB_URL:
+    raise RuntimeError("SUPABASE_DB_URL is missing. Provide a postgresql:// DSN (not the https REST URL).")
+
+scheme = urlparse(DB_URL).scheme.lower()
+if scheme not in ("postgresql", "postgres"):
+    raise RuntimeError(
+        f"SUPABASE_DB_URL must start with postgresql:// or postgres://, got '{scheme}'. "
+        "Use the Transaction Pooler DSN from Supabase, e.g. "
+        "postgresql://USER:PASSWORD@...pooler.supabase.com:6543/postgres?sslmode=require"
+    )
+
+DB_URL = os.getenv("SUPABASE_DB_URL")
 _pool: asyncpg.Pool | None = None
 
 async def db_init():
