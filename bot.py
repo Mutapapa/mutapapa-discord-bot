@@ -79,6 +79,50 @@ CONFIG_FILE = "config.json"  # {"age_gate_enabled": bool, "min_account_age_sec":
 #                       HELPERS / STORE
 # =========================================================
 
+import typing as _t
+import re as _re
+
+_LINK_RX = _re.compile(
+    r"https?://(?:canary\.)?discord(?:app)?\.com/channels/\d+/\d+/(\d+)"
+)
+
+def _extract_message_id(s: str) -> _t.Optional[int]:
+    if not s:
+        return None
+    s = s.strip()
+    if s.isdigit():
+        try:
+            return int(s)
+        except Exception:
+            return None
+    m = _LINK_RX.search(s)
+    if m:
+        try:
+            return int(m.group(1))
+        except Exception:
+            return None
+    return None
+
+def _pick_target_giveaway(arg_text: str | None, replied_mid: int | None) -> _t.Optional[int]:
+    # 1) explicit arg (raw ID or link)
+    if arg_text:
+        mid = _extract_message_id(arg_text)
+        if mid:
+            return mid
+    # 2) replied message
+    if replied_mid:
+        return replied_mid
+    # 3) any active (ended == False): choose the one ending soonest
+    active = [(int(mid), gw) for mid, gw in GIVEAWAYS.items() if not gw.get("ended")]
+    if active:
+        active.sort(key=lambda x: x[1].get("ends_at", float("inf")))
+        return active[0][0]
+    # 4) else most recently created/ended (largest ends_at)
+    if GIVEAWAYS:
+        return max(((int(mid), gw) for mid, gw in GIVEAWAYS.items()),
+                   key=lambda x: x[1].get("ends_at", 0))[0]
+    return None
+
 def load_json(path, default):
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -372,25 +416,82 @@ async def end_giveaway(message_id: int):
 @bot.event
 async def on_ready():
     # Re-attach giveaway views & timers after restarts
-    for mid, gw in list(GIVEAWAYS.items()):
-        if not gw.get("ended") and gw.get("channel_id"):
-            bot.add_view(GiveawayView(int(mid)))
-            if gw.get("ends_at"):
-                asyncio.create_task(schedule_giveaway_end(int(mid), gw["ends_at"]))
+    from discord.ui import View, button
+import random
 
-    # Start webhook server
-    asyncio.create_task(start_webserver())
-    public_url = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
-    if public_url:
-        asyncio.create_task(websub_subscribe(public_url))
-    else:
-        print("[yt-webhook] PUBLIC_BASE_URL not set; skipping subscription.")
+class GiveawayView(View):
+    def __init__(self, message_id: int):
+        super().__init__(timeout=None)
+        self.message_id = message_id
 
-    promote_loop.start()
-    x_posts_loop.start()
+    @button(label="Enter", style=discord.ButtonStyle.primary, emoji="🎉", custom_id="gw_enter")
+    async def enter_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        mid = str(self.message_id)
+        gw = GIVEAWAYS.get(mid)
+        if not gw or gw.get("ended"):
+            return await interaction.response.send_message("This giveaway is closed.", ephemeral=True)
+        if interaction.user.bot:
+            return await interaction.response.send_message("Bots can’t enter.", ephemeral=True)
 
-    print(f"Logged in as {bot.user} | latency={bot.latency:.3f}s")
+        parts = set(gw.get("participants", []))
+        if interaction.user.id in parts:
+            return await interaction.response.send_message("You’re already in ✅", ephemeral=True)
 
+        parts.add(interaction.user.id)
+        gw["participants"] = list(parts)
+        GIVEAWAYS[mid] = gw
+        save_giveaways(GIVEAWAYS)
+
+        # try to update the embed with live entry count
+        try:
+            msg = await interaction.channel.fetch_message(self.message_id)
+            new_embed = msg.embeds[0] if msg.embeds else discord.Embed(title=gw.get("title") or "Giveaway", description=gw.get("desc") or "", color=0x5865F2)
+            # rebuild fields while preserving others
+            fields = []
+            winners_count = gw.get("winners", 1)
+            have_duration = False
+            for f in new_embed.fields:
+                if f.name.lower().strip() == "duration":
+                    have_duration = True
+                fields.append((f.name, f.value, f.inline))
+            if not have_duration:
+                new_embed.add_field(name="Duration", value="—")
+
+            # ensure Winners and Entries fields exist/update
+            names = [n.lower() for n,_,_ in fields]
+            out_fields = {}
+            for n,v,i in fields:
+                out_fields[n] = (v,i)
+            out_fields["Winners"] = (str(winners_count), True)
+            out_fields["Entries"] = (str(len(parts)), True)
+
+            # clear then set
+            new_embed.clear_fields()
+            for n,(v,i) in out_fields.items():
+                new_embed.add_field(name=n, value=v, inline=i)
+
+            await msg.edit(embed=new_embed, view=self)  # keep button enabled for others
+        except Exception:
+            pass
+
+        await interaction.response.send_message("Entered! 🎉", ephemeral=True)
+
+    @button(label="View Participants", style=discord.ButtonStyle.secondary, emoji="👀", custom_id="gw_view")
+    async def view_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        mid = str(self.message_id)
+        gw = GIVEAWAYS.get(mid)
+        if not gw:
+            return await interaction.response.send_message("Giveaway not found.", ephemeral=True)
+
+        parts = gw.get("participants", [])
+        if not parts:
+            return await interaction.response.send_message("No participants yet.", ephemeral=True)
+
+        mentions = [f"<@{uid}>" for uid in parts][:100]
+        await interaction.response.send_message(
+            f"Participants ({len(parts)}):\n" + ", ".join(mentions),
+            ephemeral=True
+        )
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -420,6 +521,17 @@ async def on_message(message: discord.Message):
         save_count_state(COUNT_STATE)
 
     # ===== GIVEAWAY COMMANDS =====
+
+GIVEAWAYS[mid] = {
+    "channel_id": message.channel.id,
+    "started_at": time(),
+    "ends_at": ends_at,
+    "winners": winners_count,
+    "title": title,
+    "desc": desc,
+    "participants": [],
+    "ended": False
+}
     if clower.startswith("!gstart "):
         if not message.author.guild_permissions.administrator:
             await message.channel.send("❗ Admins only."); return
@@ -461,30 +573,53 @@ async def on_message(message: discord.Message):
         except Exception: pass
         asyncio.create_task(schedule_giveaway_end(sent.id, ends_at))
         return
-
-    if clower.startswith("!gend"):
-        if not message.author.guild_permissions.administrator:
-            await message.channel.send("❗ Admins only."); return
-        try: mid = int(content.split(maxsplit=1)[1])
-        except Exception:
-            await message.channel.send("Usage: `!gend <message_id>`"); return
-        await end_giveaway(mid)
-        await message.channel.send("✅ Ended (or already ended).")
+# --- END GIVEAWAY ---
+if clower.startswith("!gend"):
+    if not message.author.guild_permissions.administrator:
+        await message.channel.send("❗ Admins only.")
         return
 
-    if clower.startswith("!greroll"):
-        if not message.author.guild_permissions.administrator:
-            await message.channel.send("❗ Admins only."); return
-        try: mid_s = content.split(maxsplit=1)[1].strip(); _ = int(mid_s)
-        except Exception:
-            await message.channel.send("Usage: `!greroll <message_id>`"); return
-        gw = GIVEAWAYS.get(mid_s)
-        if not gw:
-            await message.channel.send("Not found."); return
-        gw["ended"] = False; save_giveaways(GIVEAWAYS)
-        await end_giveaway(int(mid_s))
-        await message.channel.send("✅ Rerolled.")
+    arg = ""
+    parts = content.split(maxsplit=1)
+    if len(parts) > 1:
+        arg = parts[1]
+
+    target_mid = _pick_target_giveaway(arg, message.reference.message_id if message.reference else None)
+    if target_mid is None:
+        await message.channel.send("No giveaway found. Start one with `!gstart ...`.")
         return
+
+    await end_giveaway(target_mid)
+    await message.channel.send("✅ Ended (or already ended).")
+    return
+
+# --- REROLL GIVEAWAY ---
+if clower.startswith("!greroll"):
+    if not message.author.guild_permissions.administrator:
+        await message.channel.send("❗ Admins only.")
+        return
+
+    arg = ""
+    parts = content.split(maxsplit=1)
+    if len(parts) > 1:
+        arg = parts[1]
+
+    target_mid = _pick_target_giveaway(arg, message.reference.message_id if message.reference else None)
+    if target_mid is None:
+        await message.channel.send("No giveaway found.")
+        return
+
+    gw = GIVEAWAYS.get(str(target_mid))
+    if not gw:
+        await message.channel.send("Not found.")
+        return
+
+    gw["ended"] = False
+    save_giveaways(GIVEAWAYS)
+    await end_giveaway(target_mid)
+    await message.channel.send("✅ Rerolled.")
+    return
+
 
     # ----- COUNT ADMIN COMMANDS -----
     if clower.startswith("!countgoal "):
