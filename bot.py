@@ -1,15 +1,15 @@
 # bot.py
 
 import os
-import re
+import asyncio
 import json
+import re
 import hmac
 import hashlib
-import random
-import asyncio
 import xml.etree.ElementTree as ET
 from time import time
 from datetime import datetime, timedelta, timezone
+import random
 
 import aiohttp
 from aiohttp import web
@@ -17,11 +17,31 @@ import discord
 from discord.ext import tasks
 from discord.ui import View, button
 
-# =========================================================
-#                   SERVER / FEATURE CONFIG
-# =========================================================
+# ================== REQUIRED ENV ==================
+# DISCORD_TOKEN         -> your bot token
+# PUBLIC_BASE_URL       -> e.g. https://mutapapa-discord-bot.onrender.com  (no trailing slash ok)
+# X_RSS_URL (optional)  -> override Nitter/RSS-Bridge URL if you have a custom one
+# ==================================================
 
-# --- Reaction Roles ---
+# ================== IDs / CONFIG (EDIT THESE) ==================
+# Guild + channels/roles
+GUILD_ID = 1411205177880608831
+WELCOME_CHANNEL_ID = 1411946767414591538
+NEWCOMER_ROLE_ID   = 1411957261009555536
+MEMBER_ROLE_ID     = 1411938410041708585
+MOD_LOG_CHANNEL_ID = 1413297073348018299
+
+# “Win/Fair/Loss” auto-reactions channel
+WFL_CHANNEL_ID = 1411931034026643476
+
+# Cross-trade watch channels (leave [] to watch all)
+MONITORED_CHANNEL_IDS = [
+    1411930067994411139, 1411930091109224479,
+    1411930638260502638, 1411930689460240395,
+    1411931034026643476
+]
+
+# Reaction-role config
 REACTION_CHANNEL_ID = 1414001588091093052
 REACTION_ROLE_MAP = {
     "📺": 1412989373556850829,
@@ -31,149 +51,120 @@ REACTION_ROLE_MAP = {
 }
 RR_STORE_FILE = "reaction_msg.json"
 
-# --- Counting channel (Asimo Says) ---
-COUNT_CHANNEL_ID = 1414051875329802320
-COUNT_STATE_FILE = "count_state.json"
+# Counting channel (Asimo says)
+COUNT_CHANNEL_ID  = 1414051875329802320
+COUNT_STATE_FILE  = "count_state.json"  # {"expected_next": int, "goal": int}
 
-# --- Giveaways (persistent) ---
-GIVEAWAYS_FILE = "giveaways.json"  # message_id -> data
-
-# --- Core server IDs ---
-GUILD_ID = 1411205177880608831
-WELCOME_CHANNEL_ID = 1411946767414591538
-NEWCOMER_ROLE_ID = 1411957261009555536
-MEMBER_ROLE_ID = 1411938410041708585
-MOD_LOG_CHANNEL_ID = 1413297073348018299
-
-# Only scan these channels for cross-trade; [] = all
-MONITORED_CHANNEL_IDS = [
-    1411930067994411139, 1411930091109224479, 1411930638260502638,
-    1411930689460240395, 1411931034026643476
-]
-
-# Win/Fair/Loss vote channel (auto-add 🇼 🇫 🇱)
-WFL_CHANNEL_ID = 1411931034026643476
-
-# --- YouTube (WebSub) ---
-YT_CHANNEL_ID = "UCSLxLMfxnFRxyhNOZMy4i9w"
+# YouTube (WebSub push)
+YT_CHANNEL_ID          = "UCSLxLMfxnFRxyhNOZMy4i9w"
 YT_ANNOUNCE_CHANNEL_ID = 1412144563144888452
-YT_PING_ROLE_ID = 1412989373556850829
-YT_CALLBACK_PATH = "/yt/webhook"
-YT_HUB = "https://pubsubhubbub.appspot.com"
-YT_SECRET = "mutapapa-youtube"   # can be ""
+YT_PING_ROLE_ID        = 1412989373556850829
+YT_CALLBACK_PATH       = "/yt/webhook"
+YT_HUB                 = "https://pubsubhubbub.appspot.com"
+YT_SECRET              = "mutapapa-youtube"  # optional HMAC secret
 
-# --- X (Twitter) via Nitter RSS ---
-X_USERNAME = "Real_Mutapapa"
-X_RSS_URL = os.getenv("X_RSS_URL", f"https://nitter.net/{X_USERNAME}/rss")
-X_ANNOUNCE_CHANNEL_ID = 1414000975680897128
-X_CACHE_FILE = "x_last_item.json"
+# X (Twitter) via RSS/Nitter
+X_USERNAME              = "Real_Mutapapa"  # no @
+X_RSS_URL               = os.getenv("X_RSS_URL", f"https://nitter.net/{X_USERNAME}/rss")
+X_ANNOUNCE_CHANNEL_ID   = 1414000975680897128
+X_CACHE_FILE            = "x_last_item.json"
 
-# --- Misc visuals ---
+# Welcome banner (Discord CDN link with ?ex may expire eventually)
 BANNER_URL = "https://cdn.discordapp.com/attachments/1411930091109224479/1413654925602459769/Welcome_to_the_Mutapapa_Official_Discord_Server_Image.png?ex=68bcb83e&is=68bb66be&hm=f248257c26608d0ee69b8baab82f62aea768f15f090ad318617e68350fe3b5ac&"
 
-# --- Age-gate config (persisted) ---
+# Giveaways state file
+GIVEAWAYS_FILE = "giveaways.json"  # message_id -> { ... }
+
+# Age gate config file
 CONFIG_FILE = "config.json"  # {"age_gate_enabled": bool, "min_account_age_sec": int}
 
+# Probation storage
+DATA_FILE = "join_times.json"  # {guild_id: {user_id: iso}}
+# ================================================================
+# =============== helpers: load/save small JSON files ============
 
-# =========================================================
-#                       HELPERS / STORE
-# =========================================================
-
-import typing as _t
-import re as _re
-
-_LINK_RX = _re.compile(
-    r"https?://(?:canary\.)?discord(?:app)?\.com/channels/\d+/\d+/(\d+)"
-)
-
-def _extract_message_id(s: str) -> _t.Optional[int]:
-    if not s:
-        return None
-    s = s.strip()
-    if s.isdigit():
-        try:
-            return int(s)
-        except Exception:
-            return None
-    m = _LINK_RX.search(s)
-    if m:
-        try:
-            return int(m.group(1))
-        except Exception:
-            return None
-    return None
-
-def _pick_target_giveaway(arg_text: str | None, replied_mid: int | None) -> _t.Optional[int]:
-    # 1) explicit arg (raw ID or link)
-    if arg_text:
-        mid = _extract_message_id(arg_text)
-        if mid:
-            return mid
-    # 2) replied message
-    if replied_mid:
-        return replied_mid
-    # 3) any active (ended == False): choose the one ending soonest
-    active = [(int(mid), gw) for mid, gw in GIVEAWAYS.items() if not gw.get("ended")]
-    if active:
-        active.sort(key=lambda x: x[1].get("ends_at", float("inf")))
-        return active[0][0]
-    # 4) else most recently created/ended (largest ends_at)
-    if GIVEAWAYS:
-        return max(((int(mid), gw) for mid, gw in GIVEAWAYS.items()),
-                   key=lambda x: x[1].get("ends_at", 0))[0]
-    return None
-
-def load_json(path, default):
+def _load_json(path, default):
     try:
         with open(path, "r", encoding="utf-8") as f:
             v = json.load(f)
-            return v if isinstance(v, type(default)) else default
+            return v if isinstance(v, type(default)) or default is None else default
     except Exception:
         return default
 
-def save_json(path, obj):
+def _save_json(path, data):
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(obj, f)
+        json.dump(data, f)
 
-# reaction-roles tracked message
-def load_rr_store(): return load_json(RR_STORE_FILE, {})
-def save_rr_store(d): save_json(RR_STORE_FILE, d)
+def load_rr_store():
+    return _load_json(RR_STORE_FILE, {})
 
-# counting state
+def save_rr_store(d):
+    _save_json(RR_STORE_FILE, d)
+
+def load_x_cache():
+    return _load_json(X_CACHE_FILE, {})
+
+def save_x_cache(d):
+    _save_json(X_CACHE_FILE, d)
+
+def load_giveaways():
+    return _load_json(GIVEAWAYS_FILE, {})
+
+def save_giveaways(d):
+    _save_json(GIVEAWAYS_FILE, d)
+
+def load_config():
+    return _load_json(CONFIG_FILE, {"age_gate_enabled": True, "min_account_age_sec": 7 * 24 * 3600})
+
+def save_config(cfg):
+    _save_json(CONFIG_FILE, cfg)
+
+def load_data():
+    return _load_json(DATA_FILE, {})
+
+def save_data(data):
+    _save_json(DATA_FILE, data)
+
 def load_count_state():
-    d = load_json(COUNT_STATE_FILE, {"expected_next": 1, "goal": 67})
+    d = _load_json(COUNT_STATE_FILE, {"expected_next": 1, "goal": 67})
     d.setdefault("expected_next", 1)
     d.setdefault("goal", 67)
     return d
-def save_count_state(d): save_json(COUNT_STATE_FILE, d)
 
-# giveaways
-def load_giveaways(): return load_json(GIVEAWAYS_FILE, {})
-def save_giveaways(d): save_json(GIVEAWAYS_FILE, d)
+def save_count_state(d):
+    _save_json(COUNT_STATE_FILE, d)
 
-# x cache
-def load_x_cache(): return load_json(X_CACHE_FILE, {})
-def save_x_cache(d): save_json(X_CACHE_FILE, d)
+# global in-memory
+GIVEAWAYS  = load_giveaways()
+CONFIG     = load_config()
+join_times = load_data()
+COUNT_STATE = load_count_state()
+
+# =============== general utils =================
+def parse_duration_to_seconds(s: str):
+    s = s.strip().lower()
+    m = re.fullmatch(r"(\d+)\s*([dhm])", s)
+    if not m: return None
+    n, unit = int(m.group(1)), m.group(2)
+    return n*24*3600 if unit=="d" else n*3600 if unit=="h" else n*60 if unit=="m" else None
+
+def humanize_seconds(sec: int) -> str:
+    if sec % (24*3600) == 0: return f"{sec // (24*3600)}d"
+    if sec % 3600 == 0:      return f"{sec // 3600}h"
+    if sec % 60 == 0:        return f"{sec // 60}m"
+    return f"{sec}s"
+
 def nitter_to_x(url: str) -> str:
     return url.replace("https://nitter.net", "https://x.com")
 
-# age-gate
-def load_config():
-    return load_json(CONFIG_FILE, {"age_gate_enabled": True, "min_account_age_sec": 7 * 24 * 3600})
-def save_config(cfg): save_json(CONFIG_FILE, cfg)
+# =============== discord client / intents ===========
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
+bot = discord.Client(intents=intents)
 
-CONFIG = load_config()
-COUNT_STATE = load_count_state()
-GIVEAWAYS = load_giveaways()
-
-# probation timers (simple file store)
-DATA_FILE = "join_times.json"
-def load_data(): return load_json(DATA_FILE, {})
-def save_data(d): save_json(DATA_FILE, d)
-join_times = load_data()
-
-# text normalization for cross-trading detector
-LEET_MAP = str.maketrans({"$": "s", "@": "a", "0": "o", "1": "i", "3": "e", "5": "s", "7": "t"})
+# =============== cross-trade detector ===============
+LEET_MAP = str.maketrans({"$":"s","@":"a","0":"o","1":"i","3":"e","5":"s","7":"t"})
 def normalize_text(s: str) -> str:
     s = s.lower().translate(LEET_MAP)
     s = re.sub(r"[\W_]+", " ", s)
@@ -199,30 +190,7 @@ CROSSTRADE_PATTERNS = [
 _report_cooldown_sec = 30
 _last_report_by_user = {}
 
-def parse_duration_to_seconds(s: str):
-    s = s.strip().lower()
-    m = re.fullmatch(r"(\d+)\s*([dhm])", s)
-    if not m: return None
-    n, unit = int(m.group(1)), m.group(2)
-    return n*24*3600 if unit=="d" else n*3600 if unit=="h" else n*60 if unit=="m" else None
-
-def humanize_seconds(sec: int) -> str:
-    if sec % (24*3600) == 0: return f"{sec // (24*3600)}d"
-    if sec % 3600 == 0:      return f"{sec // 3600}h"
-    if sec % 60 == 0:        return f"{sec // 60}m"
-    return f"{sec}s"
-
-
-# =========================================================
-#                    DISCORD CLIENT + WEB
-# =========================================================
-
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
-bot = discord.Client(intents=intents)
-
-# ---- aiohttp app (YouTube PubSub) ----
+# ================== YouTube webhook (aiohttp) ==================
 app = web.Application()
 
 async def yt_webhook_handler(request: web.Request):
@@ -231,7 +199,6 @@ async def yt_webhook_handler(request: web.Request):
 
     body = await request.read()
 
-    # Optional HMAC verification
     if YT_SECRET:
         sig = request.headers.get("X-Hub-Signature", "")
         try:
@@ -246,11 +213,11 @@ async def yt_webhook_handler(request: web.Request):
 
     try:
         root = ET.fromstring(body.decode("utf-8", errors="ignore"))
-        ns = {"atom": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/schemas/2015"}
+        ns = {"atom":"http://www.w3.org/2005/Atom","yt":"http://www.youtube.com/xml/schemas/2015"}
         entry = root.find("atom:entry", ns)
         if entry is None:
             return web.Response(text="no entry")
-        vid = entry.findtext("yt:videoId", default="", namespaces=ns)
+        vid   = entry.findtext("yt:videoId", default="", namespaces=ns)
         title = entry.findtext("atom:title", default="", namespaces=ns)
     except Exception as e:
         print(f"[yt-webhook] parse error: {e}")
@@ -272,7 +239,6 @@ async def yt_webhook_handler(request: web.Request):
                 allowed = discord.AllowedMentions(roles=True, users=False, everyone=False)
                 await ch.send(content=role.mention, embed=embed, allowed_mentions=allowed)
                 print(f"[yt-webhook] announced {vid}")
-
     return web.Response(text="ok")
 
 async def health(_):
@@ -285,6 +251,7 @@ app.add_routes([
 ])
 
 runner = web.AppRunner(app)
+
 async def start_webserver():
     await runner.setup()
     port = int(os.getenv("PORT", "8080"))
@@ -295,7 +262,7 @@ async def start_webserver():
 async def websub_subscribe(public_base_url: str):
     topic = f"https://www.youtube.com/feeds/videos.xml?channel_id={YT_CHANNEL_ID}"
     callback = f"{public_base_url.rstrip('/')}{YT_CALLBACK_PATH}"
-    data = {"hub.mode": "subscribe", "hub.topic": topic, "hub.callback": callback, "hub.verify": "async"}
+    data = {"hub.mode":"subscribe","hub.topic":topic,"hub.callback":callback,"hub.verify":"async"}
     if YT_SECRET:
         data["hub.secret"] = YT_SECRET
     try:
@@ -305,10 +272,10 @@ async def websub_subscribe(public_base_url: str):
     except Exception as e:
         print(f"[yt-webhook] subscribe error: {e}")
 
-
-# =========================================================
-#                       GIVEAWAYS
-# =========================================================
+# ================== Giveaways (buttons) ==================
+# state: GIVEAWAYS[msg_id_str] = {
+#   channel_id, ends_at, winners, title, desc, participants:[user_id], ended:bool
+# }
 
 class GiveawayView(View):
     def __init__(self, message_id: int):
@@ -316,26 +283,30 @@ class GiveawayView(View):
         self.message_id = message_id
 
     @button(label="Enter", style=discord.ButtonStyle.primary, emoji="🎉", custom_id="gw_enter")
-    async def enter_btn(self, interaction: discord.Interaction, _):
+    async def enter_btn(self, interaction: discord.Interaction, btn: discord.ui.Button):
         mid = str(self.message_id)
         gw = GIVEAWAYS.get(mid)
         if not gw or gw.get("ended"):
             return await interaction.response.send_message("This giveaway is closed.", ephemeral=True)
+
         if interaction.user.bot:
             return await interaction.response.send_message("Bots can’t enter.", ephemeral=True)
 
         parts = set(gw.get("participants", []))
         if interaction.user.id in parts:
+            # Simulate “greying out” per-user by refusing future entries
             return await interaction.response.send_message("You’re already in 🎉", ephemeral=True)
 
         parts.add(interaction.user.id)
         gw["participants"] = list(parts)
         GIVEAWAYS[mid] = gw
         save_giveaways(GIVEAWAYS)
+
+        # We can’t disable the button for just one user globally; we acknowledge & block repeats.
         await interaction.response.send_message("Entered! 🎉", ephemeral=True)
 
     @button(label="View Participants", style=discord.ButtonStyle.secondary, emoji="👀", custom_id="gw_view")
-    async def view_btn(self, interaction: discord.Interaction, _):
+    async def view_btn(self, interaction: discord.Interaction, btn: discord.ui.Button):
         mid = str(self.message_id)
         gw = GIVEAWAYS.get(mid)
         if not gw:
@@ -345,6 +316,7 @@ class GiveawayView(View):
         if not parts:
             return await interaction.response.send_message("No participants yet.", ephemeral=True)
 
+        # show top N mentions; full list can be long
         mentions = [f"<@{uid}>" for uid in parts][:100]
         await interaction.response.send_message(
             f"Participants ({len(parts)}):\n" + ", ".join(mentions),
@@ -367,196 +339,134 @@ async def end_giveaway(message_id: int):
         try:
             msg = await channel.fetch_message(message_id)
         except Exception:
-            pass
+            msg = None
 
+    # pick winners
     parts = [p for p in set(gw.get("participants", [])) if isinstance(p, int)]
     winners_count = max(1, int(gw.get("winners", 1)))
     winners = random.sample(parts, k=min(winners_count, len(parts))) if parts else []
 
-    title = gw.get("title") or "Giveaway"
-    desc = gw.get("desc") or ""
-
-    # Build final embed (in-place edit)
-    embed = discord.Embed(title=title, description=desc, color=0x5865F2)
-    if winners:
-        winners_mentions = " ".join(f"<@{w}>" for w in winners)
-        embed.add_field(name="Winners", value=winners_mentions, inline=False)
-        footer = "Giveaway ended — congrats!"
-    else:
-        embed.add_field(name="Winners", value="None", inline=False)
-        footer = "Giveaway ended — no valid entries."
-    embed.set_footer(text=footer)
+    # build final embed (editing embed avoids “(edited)” tag)
+    embed = discord.Embed(
+        title=gw.get("title") or "Giveaway",
+        description=gw.get("desc") or "",
+        color=0x5865F2
+    )
+    win_text = "None" if not winners else " ".join(f"<@{w}>" for w in winners)
+    embed.add_field(name="Winners", value=win_text)
+    embed.set_footer(text="Giveaway ended")
 
     view = GiveawayView(message_id)
     for item in view.children:
-        item.disabled = True
+        item.disabled = True  # disable both buttons globally at the end
 
     if msg:
         try:
             await msg.edit(embed=embed, view=view)
         except Exception:
             pass
-
-        # Optional extra message
-        if winners:
-            try:
+        try:
+            if winners:
                 await channel.send("🎉 **Winners:** " + " ".join(f"<@{w}>" for w in winners))
-            except Exception:
-                pass
+            else:
+                await channel.send("No valid entries.")
+        except Exception:
+            pass
 
     gw["ended"] = True
     GIVEAWAYS[mid] = gw
     save_giveaways(GIVEAWAYS)
 
+def most_recent_active_giveaway_id() -> int | None:
+    # choose most recent by ends_at among not ended
+    active = [(int(mid), data) for mid, data in GIVEAWAYS.items() if not data.get("ended")]
+    if not active:
+        return None
+    active.sort(key=lambda x: x[1].get("ends_at", 0), reverse=True)
+    return active[0][0]
 
-# =========================================================
-#                       EVENTS / LOOPS
-# =========================================================
-
+# ================== Discord events ==================
 @bot.event
 async def on_ready():
-    # Re-attach giveaway views & timers after restarts
-    from discord.ui import View, button
-import random
+    # Re-attach giveaway views & schedule endings
+    for mid, gw in list(GIVEAWAYS.items()):
+        mid_int = int(mid)
+        if not gw.get("ended") and gw.get("channel_id"):
+            bot.add_view(GiveawayView(mid_int))
+            if gw.get("ends_at"):
+                asyncio.create_task(schedule_giveaway_end(mid_int, gw["ends_at"]))
 
-class GiveawayView(View):
-    def __init__(self, message_id: int):
-        super().__init__(timeout=None)
-        self.message_id = message_id
+    print(f"Logged in as {bot.user} | latency={bot.latency:.3f}s")
 
-    @button(label="Enter", style=discord.ButtonStyle.primary, emoji="🎉", custom_id="gw_enter")
-    async def enter_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        mid = str(self.message_id)
-        gw = GIVEAWAYS.get(mid)
-        if not gw or gw.get("ended"):
-            return await interaction.response.send_message("This giveaway is closed.", ephemeral=True)
-        if interaction.user.bot:
-            return await interaction.response.send_message("Bots can’t enter.", ephemeral=True)
+    # web server for YouTube push
+    asyncio.create_task(start_webserver())
+    public_url = os.getenv("PUBLIC_BASE_URL","").rstrip("/")
+    if public_url:
+        asyncio.create_task(websub_subscribe(public_url))
+    else:
+        print("[yt-webhook] PUBLIC_BASE_URL not set; skipping subscription.")
 
-        parts = set(gw.get("participants", []))
-        if interaction.user.id in parts:
-            return await interaction.response.send_message("You’re already in ✅", ephemeral=True)
+    # background loops
+    promote_loop.start()
+    x_posts_loop.start()
 
-        parts.add(interaction.user.id)
-        gw["participants"] = list(parts)
-        GIVEAWAYS[mid] = gw
-        save_giveaways(GIVEAWAYS)
-
-        # try to update the embed with live entry count
-        try:
-            msg = await interaction.channel.fetch_message(self.message_id)
-            new_embed = msg.embeds[0] if msg.embeds else discord.Embed(title=gw.get("title") or "Giveaway", description=gw.get("desc") or "", color=0x5865F2)
-            # rebuild fields while preserving others
-            fields = []
-            winners_count = gw.get("winners", 1)
-            have_duration = False
-            for f in new_embed.fields:
-                if f.name.lower().strip() == "duration":
-                    have_duration = True
-                fields.append((f.name, f.value, f.inline))
-            if not have_duration:
-                new_embed.add_field(name="Duration", value="—")
-
-            # ensure Winners and Entries fields exist/update
-            names = [n.lower() for n,_,_ in fields]
-            out_fields = {}
-            for n,v,i in fields:
-                out_fields[n] = (v,i)
-            out_fields["Winners"] = (str(winners_count), True)
-            out_fields["Entries"] = (str(len(parts)), True)
-
-            # clear then set
-            new_embed.clear_fields()
-            for n,(v,i) in out_fields.items():
-                new_embed.add_field(name=n, value=v, inline=i)
-
-            await msg.edit(embed=new_embed, view=self)  # keep button enabled for others
-        except Exception:
-            pass
-
-        await interaction.response.send_message("Entered! 🎉", ephemeral=True)
-
-    @button(label="View Participants", style=discord.ButtonStyle.secondary, emoji="👀", custom_id="gw_view")
-    async def view_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        mid = str(self.message_id)
-        gw = GIVEAWAYS.get(mid)
-        if not gw:
-            return await interaction.response.send_message("Giveaway not found.", ephemeral=True)
-
-        parts = gw.get("participants", [])
-        if not parts:
-            return await interaction.response.send_message("No participants yet.", ephemeral=True)
-
-        mentions = [f"<@{uid}>" for uid in parts][:100]
-        await interaction.response.send_message(
-            f"Participants ({len(parts)}):\n" + ", ".join(mentions),
-            ephemeral=True
-        )
-
+# ================== Command + message handling ==================
 @bot.event
 async def on_message(message: discord.Message):
-    # ignore DMs & bot messages
+    # Counting channel enforcement (delete invalid/wrong numbers)
+    if message.guild and message.channel.id == COUNT_CHANNEL_ID and not message.author.bot:
+        if message.content.startswith("!"):
+            pass  # let commands below run
+        else:
+            txt = message.content.strip()
+            if not re.fullmatch(r"\d+", txt):
+                try: await message.delete()
+                except: pass
+                return
+            n = int(txt)
+            expected = COUNT_STATE.get("expected_next", 1)
+            if n != expected:
+                try: await message.delete()
+                except: pass
+                return
+            COUNT_STATE["expected_next"] = expected + 1
+            save_count_state(COUNT_STATE)
+
+    # Ignore DMs or bot authors for commands below
     if message.author.bot or not message.guild:
         return
 
     content = message.content.strip()
-    clower = content.lower()
+    clower  = content.lower()
 
-    # ---------- COUNTING CHANNEL RULES ----------
-    if message.channel.id == COUNT_CHANNEL_ID and not content.startswith("!"):
-        if not re.fullmatch(r"\d+", content):
-            try: await message.delete()
-            except Exception: pass
-            return
-
-        n = int(content)
-        expected = COUNT_STATE.get("expected_next", 1)
-
-        if n != expected:
-            try: await message.delete()
-            except Exception: pass
-            return
-
-        COUNT_STATE["expected_next"] = expected + 1
-        save_count_state(COUNT_STATE)
-
-    # ===== GIVEAWAY COMMANDS =====
-
-GIVEAWAYS[mid] = {
-    "channel_id": message.channel.id,
-    "started_at": time(),
-    "ends_at": ends_at,
-    "winners": winners_count,
-    "title": title,
-    "desc": desc,
-    "participants": [],
-    "ended": False
-}
+    # ---------- GIVEAWAY COMMANDS ----------
     if clower.startswith("!gstart "):
         if not message.author.guild_permissions.administrator:
-            await message.channel.send("❗ Admins only."); return
+            return await message.channel.send("❗ Admins only.")
+        # format: !gstart <duration> | <winners> | <title> | <description>
         try:
-            _, rest = content.split(" ", 1)
+            _, rest = message.content.split(" ", 1)
             parts = [p.strip() for p in rest.split("|")]
-            dur_s = parse_duration_to_seconds(parts[0])
+            dur_s = parse_duration_to_seconds(parts[0])            # e.g. 1h, 30m, 2d
             winners_count = int(parts[1])
             title = parts[2]
             desc = parts[3] if len(parts) > 3 else ""
         except Exception:
-            await message.channel.send(
+            return await message.channel.send(
                 "Usage: `!gstart <duration> | <winners> | <title> | <description>`\n"
                 "e.g. `!gstart 2h | 2 | Nitro Classic | Click Enter to join!`"
-            ); return
+            )
+
         if not dur_s or dur_s <= 0 or winners_count < 1:
-            await message.channel.send("❗ Bad duration or winners."); return
+            return await message.channel.send("❗ Bad duration or winners.")
 
         ends_at = time() + dur_s
         embed = discord.Embed(title=title, description=desc, color=0x5865F2)
-        embed.add_field(name="Duration", value=parts[0])
+        embed.add_field(name="Duration", value=f"{parts[0]}")
         embed.add_field(name="Winners", value=str(winners_count))
         embed.set_footer(text="Press Enter to join • View Participants to see who’s in")
-        sent = await message.channel.send(embed=embed, view=GiveawayView(0))
 
+        sent = await message.channel.send(embed=embed, view=GiveawayView(0))  # temp
         mid = str(sent.id)
         GIVEAWAYS[mid] = {
             "channel_id": message.channel.id,
@@ -569,124 +479,153 @@ GIVEAWAYS[mid] = {
         }
         save_giveaways(GIVEAWAYS)
 
-        try: await sent.edit(view=GiveawayView(sent.id))
-        except Exception: pass
+        # attach real view with correct message id
+        try:
+            await sent.edit(view=GiveawayView(sent.id))
+        except Exception:
+            pass
+
         asyncio.create_task(schedule_giveaway_end(sent.id, ends_at))
-        return
-# --- END GIVEAWAY ---
-if clower.startswith("!gend"):
-    if not message.author.guild_permissions.administrator:
-        await message.channel.send("❗ Admins only.")
-        return
 
-    arg = ""
-    parts = content.split(maxsplit=1)
-    if len(parts) > 1:
-        arg = parts[1]
-
-    target_mid = _pick_target_giveaway(arg, message.reference.message_id if message.reference else None)
-    if target_mid is None:
-        await message.channel.send("No giveaway found. Start one with `!gstart ...`.")
+        # delete the successful command message
+        try: await message.delete()
+        except: pass
         return
 
-    await end_giveaway(target_mid)
-    await message.channel.send("✅ Ended (or already ended).")
-    return
+    if clower.startswith("!gend"):
+        if not message.author.guild_permissions.administrator:
+            return await message.channel.send("❗ Admins only.")
+        # optional: !gend <message_id> ; if omitted -> latest active
+        target_id = None
+        parts = message.content.split(maxsplit=1)
+        if len(parts) == 2 and parts[1].strip().isdigit():
+            target_id = int(parts[1].strip())
+        else:
+            target_id = most_recent_active_giveaway_id()
 
-# --- REROLL GIVEAWAY ---
-if clower.startswith("!greroll"):
-    if not message.author.guild_permissions.administrator:
-        await message.channel.send("❗ Admins only.")
+        if not target_id:
+            return await message.channel.send("No active giveaway found.")
+        await end_giveaway(target_id)
+
+        try: await message.delete()
+        except: pass
         return
 
-    arg = ""
-    parts = content.split(maxsplit=1)
-    if len(parts) > 1:
-        arg = parts[1]
+    if clower.startswith("!greroll"):
+        if not message.author.guild_permissions.administrator:
+            return await message.channel.send("❗ Admins only.")
+        # optional: !greroll <message_id> ; if omitted -> latest (ended or active)
+        target_id = None
+        parts = message.content.split(maxsplit=1)
+        if len(parts) == 2 and parts[1].strip().isdigit():
+            target_id = int(parts[1].strip())
+        else:
+            # choose most recent by ends_at among any
+            if not GIVEAWAYS:
+                return await message.channel.send("No giveaways found.")
+            items = [(int(mid), d.get("ends_at", 0)) for mid, d in GIVEAWAYS.items()]
+            items.sort(key=lambda t: t[1], reverse=True)
+            target_id = items[0][0]
 
-    target_mid = _pick_target_giveaway(arg, message.reference.message_id if message.reference else None)
-    if target_mid is None:
-        await message.channel.send("No giveaway found.")
+        mid = str(target_id)
+        gw = GIVEAWAYS.get(mid)
+        if not gw:
+            return await message.channel.send("Not found.")
+
+        gw["ended"] = False
+        save_giveaways(GIVEAWAYS)
+        await end_giveaway(target_id)
+
+        try: await message.delete()
+        except: pass
         return
 
-    gw = GIVEAWAYS.get(str(target_mid))
-    if not gw:
-        await message.channel.send("Not found.")
-        return
-
-    gw["ended"] = False
-    save_giveaways(GIVEAWAYS)
-    await end_giveaway(target_mid)
-    await message.channel.send("✅ Rerolled.")
-    return
-
-
-    # ----- COUNT ADMIN COMMANDS -----
+    # ---------- COUNT ADMIN COMMANDS ----------
     if clower.startswith("!countgoal "):
         if not message.author.guild_permissions.administrator:
-            await message.channel.send("❗ Admins only."); return
+            return await message.channel.send("❗ Admins only.")
         try:
-            new_goal = int(content.split(maxsplit=1)[1]); assert new_goal > 0
+            new_goal = int(message.content.split(maxsplit=1)[1])
+            if new_goal < 1: raise ValueError
         except Exception:
-            await message.channel.send("Usage: `!countgoal <positive integer>`"); return
-        COUNT_STATE["goal"] = new_goal; save_count_state(COUNT_STATE)
-        await message.channel.send(f"✅ Goal set to **{new_goal}**."); return
+            return await message.channel.send("Usage: `!countgoal <positive integer>`")
+        COUNT_STATE["goal"] = new_goal
+        save_count_state(COUNT_STATE)
+        try: await message.delete()
+        except: pass
+        return await message.channel.send(f"✅ Goal set to **{new_goal}**.")
 
     if clower.startswith("!countnext "):
         if not message.author.guild_permissions.administrator:
-            await message.channel.send("❗ Admins only."); return
+            return await message.channel.send("❗ Admins only.")
         try:
-            new_next = int(content.split(maxsplit=1)[1]); assert new_next > 0
+            new_next = int(message.content.split(maxsplit=1)[1])
+            if new_next < 1: raise ValueError
         except Exception:
-            await message.channel.send("Usage: `!countnext <positive integer>`"); return
-        COUNT_STATE["expected_next"] = new_next; save_count_state(COUNT_STATE)
-        await message.channel.send(f"✅ Next expected number set to **{new_next}**."); return
+            return await message.channel.send("Usage: `!countnext <positive integer>`")
+        COUNT_STATE["expected_next"] = new_next
+        save_count_state(COUNT_STATE)
+        try: await message.delete()
+        except: pass
+        return await message.channel.send(f"✅ Next expected number set to **{new_next}**.")
 
     if clower == "!countreset":
         if not message.author.guild_permissions.administrator:
-            await message.channel.send("❗ Admins only."); return
-        COUNT_STATE["expected_next"] = 1; save_count_state(COUNT_STATE)
-        await message.channel.send("✅ Counter reset. Next expected number is **1**."); return
+            return await message.channel.send("❗ Admins only.")
+        COUNT_STATE["expected_next"] = 1
+        save_count_state(COUNT_STATE)
+        try: await message.delete()
+        except: pass
+        return await message.channel.send("✅ Counter reset. Next expected number is **1**.")
 
     if clower == "!countstatus":
         st = COUNT_STATE
-        await message.channel.send(f"🔢 Next: **{st.get('expected_next',1)}** | Goal: **{st.get('goal',67)}**")
-        return
+        return await message.channel.send(
+            f"🔢 Next: **{st.get('expected_next', 1)}** | Goal: **{st.get('goal', 67)}**"
+        )
 
-    # simple ping
+    # ---------- Utility/admin ----------
     if clower == "!ping":
-        await message.channel.send("pong 🏓"); return
+        return await message.channel.send("pong 🏓")
 
-    # admin: send as bot
+    # make bot say a message
     if clower.startswith("!send "):
         if not message.author.guild_permissions.administrator:
-            await message.channel.send("❗ Admins only."); return
+            return await message.channel.send("❗ Admins only.")
         text = content.split(" ", 1)[1].strip()
-        if not text: await message.channel.send("Usage: `!send <message>`"); return
-        await message.channel.send(text); return
+        if not text:
+            return await message.channel.send("Usage: `!send <message>`")
+        try: await message.delete()
+        except: pass
+        return await message.channel.send(text)
 
-    # admin: create reaction-role message
+    # create the reaction-role message (and track it)
     if clower.startswith("!sendreact "):
         if not message.author.guild_permissions.administrator:
-            await message.channel.send("❗ Admins only."); return
+            return await message.channel.send("❗ Admins only.")
         rr_channel = message.guild.get_channel(REACTION_CHANNEL_ID)
         if not rr_channel:
-            await message.channel.send("❗ REACTION_CHANNEL_ID is wrong or I can’t see that channel."); return
+            return await message.channel.send("❗ REACTION_CHANNEL_ID is wrong or I can’t see that channel.")
         body = content.split(" ", 1)[1].strip()
         if not body:
-            await message.channel.send("Usage: `!sendreact <message to show users>`"); return
+            return await message.channel.send("Usage: `!sendreact <message to show users>`")
         sent = await rr_channel.send(body)
         for emoji in REACTION_ROLE_MAP.keys():
-            try: await sent.add_reaction(emoji)
-            except Exception: pass
-        store = load_rr_store(); store["message_id"] = sent.id; store["channel_id"] = rr_channel.id
+            try:
+                await sent.add_reaction(emoji)
+            except Exception:
+                pass
+        store = load_rr_store()
+        store["message_id"] = sent.id
+        store["channel_id"] = rr_channel.id
         save_rr_store(store)
-        await message.channel.send(f"✅ Reaction-roles set on `{sent.id}` in {rr_channel.mention}.")
-        return
+        try: await message.delete()
+        except: pass
+        return await message.channel.send(f"✅ Reaction-roles set on message ID `{sent.id}` in {rr_channel.mention}.")
 
-    # ---------- W/F/L auto-reaction ----------
+    # ---------- W/F/L auto-reactions (ONLY in WFL channel) ----------
     if message.channel.id == WFL_CHANNEL_ID:
-        t = clower
+        t = message.content.lower()
         has_wfl = (
             re.search(r"\bw\s*/\s*f\s*/\s*l\b", t) or
             re.search(r"\bwin\b.*\bfair\b.*\bloss\b", t) or
@@ -696,17 +635,21 @@ if clower.startswith("!greroll"):
         )
         if has_wfl:
             try:
-                await message.add_reaction("🇼"); await message.add_reaction("🇫"); await message.add_reaction("🇱")
+                await message.add_reaction("🇼")
+                await message.add_reaction("🇫")
+                await message.add_reaction("🇱")
             except Exception as e:
-                print(f"[wfl] failed to add reactions: {e}")
+                print(f"[wfl] add reaction failed: {e}")
+        # fallthrough to detector
 
-    # --- cross-trade detector ---
+    # ---------- Cross-trade detector ----------
     if message.channel.id == MOD_LOG_CHANNEL_ID:
         return
     if MONITORED_CHANNEL_IDS and (message.channel.id not in MONITORED_CHANNEL_IDS):
         return
-    raw = content
-    if not raw.strip(): return
+    raw = message.content or ""
+    if not raw.strip():
+        return
     norm = normalize_text(raw)
     hits = set()
     for w in BUY_SELL_WORDS:
@@ -715,18 +658,20 @@ if clower.startswith("!greroll"):
         if f" {w} " in f" {norm} ": hits.add(w)
     for rx in CROSSTRADE_PATTERNS:
         if rx.search(raw) or rx.search(norm): hits.add(rx.pattern)
-    if not hits: return
-    now_t = time()
+    if not hits:
+        return
+    now = time()
     last = _last_report_by_user.get(message.author.id, 0)
-    if now_t - last < _report_cooldown_sec: return
-    _last_report_by_user[message.author.id] = now_t
+    if now - last < _report_cooldown_sec:
+        return
+    _last_report_by_user[message.author.id] = now
     modlog = message.guild.get_channel(MOD_LOG_CHANNEL_ID)
     if modlog:
         embed = discord.Embed(
             title="⚠️ Possible Cross-Trading / Black-Market Activity",
             description=(f"**User:** {message.author.mention} (`{message.author}`)\n"
                          f"**Channel:** {message.channel.mention}\n"
-                         f"**Message:**\n{raw[:1000]}"),
+                         f"**Message:**\n{message.content[:1000]}"),
             color=0xE67E22
         )
         embed.add_field(name="Triggers", value=", ".join(sorted(hits))[:1024], inline=False)
@@ -734,8 +679,9 @@ if clower.startswith("!greroll"):
         embed.timestamp = discord.utils.utcnow()
         embed.set_footer(text=f"User ID: {message.author.id}")
         await modlog.send(embed=embed)
+        print(f"[modlog] Reported {message.author} in #{message.channel} with hits: {hits}")
 
-
+# ================== Reaction-role add/remove ==================
 @bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     if payload.guild_id != GUILD_ID:
@@ -743,14 +689,24 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     if payload.user_id == (bot.user.id if bot.user else 0):
         return
     store = load_rr_store()
-    if payload.message_id != store.get("message_id") or payload.channel_id != store.get("channel_id"):
+    tracked_msg_id = store.get("message_id")
+    tracked_chan_id = store.get("channel_id")
+    if not tracked_msg_id or not tracked_chan_id:
         return
-    role_id = REACTION_ROLE_MAP.get(str(payload.emoji))
+    if payload.message_id != tracked_msg_id or payload.channel_id != tracked_chan_id:
+        return
+    emoji = str(payload.emoji)
+    role_id = REACTION_ROLE_MAP.get(emoji)
     if not role_id:
         return
-    guild = bot.get_guild(payload.guild_id); member = guild.get_member(payload.user_id)
-    role = guild.get_role(role_id) if guild else None
-    if not (guild and member and role):
+    guild = bot.get_guild(payload.guild_id)
+    if not guild:
+        return
+    role = guild.get_role(role_id)
+    if not role:
+        return
+    member = guild.get_member(payload.user_id)
+    if not member:
         return
     try:
         if role not in member.roles:
@@ -765,14 +721,24 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     if payload.guild_id != GUILD_ID:
         return
     store = load_rr_store()
-    if payload.message_id != store.get("message_id") or payload.channel_id != store.get("channel_id"):
+    tracked_msg_id = store.get("message_id")
+    tracked_chan_id = store.get("channel_id")
+    if not tracked_msg_id or not tracked_chan_id:
         return
-    role_id = REACTION_ROLE_MAP.get(str(payload.emoji))
+    if payload.message_id != tracked_msg_id or payload.channel_id != tracked_chan_id:
+        return
+    emoji = str(payload.emoji)
+    role_id = REACTION_ROLE_MAP.get(emoji)
     if not role_id:
         return
-    guild = bot.get_guild(payload.guild_id); member = guild.get_member(payload.user_id)
-    role = guild.get_role(role_id) if guild else None
-    if not (guild and member and role):
+    guild = bot.get_guild(payload.guild_id)
+    if not guild:
+        return
+    role = guild.get_role(role_id)
+    if not role:
+        return
+    member = guild.get_member(payload.user_id)
+    if not member:
         return
     try:
         if role in member.roles:
@@ -782,6 +748,7 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     except Exception as e:
         print(f"[rr] remove error: {e}")
 
+# ================== Member join (age gate + welcome) ==================
 @bot.event
 async def on_member_join(member: discord.Member):
     if member.bot or member.guild.id != GUILD_ID:
@@ -834,8 +801,8 @@ async def on_member_join(member: discord.Member):
     gstore[str(member.id)] = now.isoformat()
     save_data(join_times)
 
-    channel = guild.get_channel(WELCOME_CHANNEL_ID)
-    if channel:
+    ch = guild.get_channel(WELCOME_CHANNEL_ID)
+    if ch:
         embed = discord.Embed(
             title=f"Welcome to {guild.name}, {member.name}!",
             description=(f"Hey {member.mention}! Welcome to the **Mutapapa Official Discord Server!** "
@@ -844,17 +811,17 @@ async def on_member_join(member: discord.Member):
         )
         embed.set_thumbnail(url=member.display_avatar.url)
         embed.set_image(url=BANNER_URL)
-        await channel.send(embed=embed)
+        await ch.send(embed=embed)
 
-# ---- Background loops ----
+# ================== Background loops ==================
 @tasks.loop(minutes=5)
 async def promote_loop():
     await bot.wait_until_ready()
     guild = bot.get_guild(GUILD_ID)
     if not guild:
         return
-    newcomer = guild.get_role(NEWCOMER_ROLE_ID)
-    member_role = guild.get_role(MEMBER_ROLE_ID)
+    newcomer   = guild.get_role(NEWCOMER_ROLE_ID)
+    member_role= guild.get_role(MEMBER_ROLE_ID)
     if not newcomer or not member_role:
         return
     store = join_times.get(str(GUILD_ID), {})
@@ -928,7 +895,7 @@ async def x_posts_loop():
     latest_guid = last_guid
     for it in new_items:
         title = (it.findtext("title") or "").strip()
-        link = (it.findtext("link") or "").strip()
+        link  = (it.findtext("link") or "").strip()
         pubdate = (it.findtext("pubDate") or "").strip()
         x_link = nitter_to_x(link) if link else None
         embed = discord.Embed(
@@ -947,11 +914,7 @@ async def x_posts_loop():
         save_x_cache({"last_guid": latest_guid})
         print(f"[x] announced {len(new_items)} new post(s)")
 
-
-# =========================================================
-#                          RUN
-# =========================================================
-
+# ================== Run ==================
 token = os.getenv("DISCORD_TOKEN")
 if not token:
     raise RuntimeError("DISCORD_TOKEN env var is missing")
