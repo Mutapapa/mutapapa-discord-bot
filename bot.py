@@ -15,6 +15,11 @@ from aiohttp import web
 import discord
 from discord.ext import tasks
 
+# ===== Counting channel (Asimo Says) =====
+COUNT_CHANNEL_ID = 1414051875329802320  # <--- replace with the channel ID for #asimo-says-count-to-67
+COUNT_STATE_FILE = "count_state.json"
+
+
 # ================== REACTION ROLES ==================
 REACTION_CHANNEL_ID = 1414001588091093052
 
@@ -149,6 +154,26 @@ CROSSTRADE_PATTERNS = [
 _report_cooldown_sec = 30
 _last_report_by_user = {}
 
+def load_count_state():
+    try:
+        with open(COUNT_STATE_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+            if not isinstance(d, dict):
+                raise ValueError
+            # defaults
+            d.setdefault("expected_next", 1)
+            d.setdefault("goal", 67)
+            return d
+    except Exception:
+        return {"expected_next": 1, "goal": 67}
+
+def save_count_state(d: dict):
+    with open(COUNT_STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(d, f)
+
+COUNT_STATE = load_count_state()
+
+
 # ================== YouTube webhook ==================
 app = web.Application()
 
@@ -240,11 +265,98 @@ async def on_ready():
 
 @bot.event
 async def on_message(message: discord.Message):
+
+    # ---------- COUNTING CHANNEL RULES ----------
+    if message.channel.id == COUNT_CHANNEL_ID and not message.author.bot:
+        # allow admin commands in this channel (so you can adjust goal/next)
+        if message.content.startswith("!"):
+            pass  # let commands below handle it
+        else:
+            txt = message.content.strip()
+
+            # must be digits only (no spaces, punctuation, emojis, etc.)
+            if not re.fullmatch(r"\d+", txt):
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+                return
+
+            n = int(txt)
+            expected = COUNT_STATE.get("expected_next", 1)
+            goal = COUNT_STATE.get("goal", 67)
+
+            # wrong number -> delete silently
+            if n != expected:
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+                return
+
+            # correct -> advance counter
+            COUNT_STATE["expected_next"] = expected + 1
+            save_count_state(COUNT_STATE)
+
+            # optional: if you want to stop exactly at goal, delete any numbers > goal
+            # and (optionally) post a completion message. By default we just keep going.
+
     if message.author.bot or not message.guild:
         return
 
     content = message.content.strip()
     clower = content.lower()
+
+    # ----- COUNT ADMIN COMMANDS -----
+    if clower.startswith("!countgoal "):
+        if not message.author.guild_permissions.administrator:
+            await message.channel.send("❗ Admins only.")
+            return
+        try:
+            new_goal = int(message.content.split(maxsplit=1)[1])
+            if new_goal < 1:
+                raise ValueError
+        except Exception:
+            await message.channel.send("Usage: `!countgoal <positive integer>`")
+            return
+        COUNT_STATE["goal"] = new_goal
+        save_count_state(COUNT_STATE)
+        await message.channel.send(f"✅ Goal set to **{new_goal}**.")
+
+        return
+
+    if clower.startswith("!countnext "):
+        if not message.author.guild_permissions.administrator:
+            await message.channel.send("❗ Admins only.")
+            return
+        try:
+            new_next = int(message.content.split(maxsplit=1)[1])
+            if new_next < 1:
+                raise ValueError
+        except Exception:
+            await message.channel.send("Usage: `!countnext <positive integer>`")
+            return
+        COUNT_STATE["expected_next"] = new_next
+        save_count_state(COUNT_STATE)
+        await message.channel.send(f"✅ Next expected number set to **{new_next}**.")
+        return
+
+    if clower == "!countreset":
+        if not message.author.guild_permissions.administrator:
+            await message.channel.send("❗ Admins only.")
+            return
+        COUNT_STATE["expected_next"] = 1
+        save_count_state(COUNT_STATE)
+        await message.channel.send("✅ Counter reset. Next expected number is **1**.")
+        return
+
+    if clower == "!countstatus":
+        st = COUNT_STATE
+        await message.channel.send(
+            f"🔢 Next: **{st.get('expected_next', 1)}** | Goal: **{st.get('goal', 67)}**"
+        )
+        return
+
 
     # simple ping
     if clower == "!ping":
