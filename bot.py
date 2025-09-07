@@ -16,12 +16,10 @@ import discord
 from discord.ext import tasks
 
 # ================== REACTION ROLES ==================
-# The channel where the reaction-role message will live:
-REACTION_CHANNEL_ID = 1414001588091093052   # TODO: put your real channel ID here
+REACTION_CHANNEL_ID = 1414001588091093052
 
-# Map emoji -> role ID (add more if you want)
 REACTION_ROLE_MAP = {
-    "📺": 1412989373556850829,  # TODO: replace with your target role IDs
+    "📺": 1412989373556850829,
     "🔔": 1412993171670958232,
     "✖️": 1414001344297172992,
     "🎉": 1412992931148595301,
@@ -36,17 +34,18 @@ def load_rr_store():
         return {}
 def save_rr_store(d):
     with open(RR_STORE_FILE, "w", encoding="utf-8") as f:
-            json.dump(d, f)
+        json.dump(d, f)
 
 # ================== YOUR IDs / CONFIG ==================
-# Discord
 GUILD_ID = 1411205177880608831
 WELCOME_CHANNEL_ID = 1411946767414591538
 NEWCOMER_ROLE_ID = 1411957261009555536
 MEMBER_ROLE_ID = 1411938410041708585
 MOD_LOG_CHANNEL_ID = 1413297073348018299
 
-# Monitor only these channels (leave [] to monitor all)
+# Win/Fair/Loss voting channel (ONLY reacts here)
+WFL_CHANNEL_ID = 1411931034026643476
+
 MONITORED_CHANNEL_IDS = [
     1411930067994411139, 1411930091109224479, 1411930638260502638,
     1411930689460240395, 1411931034026643476
@@ -58,10 +57,10 @@ YT_ANNOUNCE_CHANNEL_ID = 1412144563144888452
 YT_PING_ROLE_ID = 1412989373556850829
 YT_CALLBACK_PATH = "/yt/webhook"
 YT_HUB = "https://pubsubhubbub.appspot.com"
-YT_SECRET = "mutapapa-youtube"   # optional HMAC secret (can be empty "")
+YT_SECRET = "mutapapa-youtube"
 
-# X (Twitter) RSS settings (free/near-real-time)
-X_USERNAME = "Real_Mutapapa"  # without @
+# X (Twitter) RSS
+X_USERNAME = "Real_Mutapapa"
 X_RSS_URL = os.getenv("X_RSS_URL", f"https://nitter.net/{X_USERNAME}/rss")
 X_ANNOUNCE_CHANNEL_ID = 1414000975680897128
 X_CACHE_FILE = "x_last_item.json"
@@ -77,10 +76,9 @@ def save_x_cache(d):
 def nitter_to_x(url: str) -> str:
     return url.replace("https://nitter.net", "https://x.com")
 
-# Hosted banner URL (Discord CDN links with ?ex= can expire—consider a stable host later)
 BANNER_URL = "https://cdn.discordapp.com/attachments/1411930091109224479/1413654925602459769/Welcome_to_the_Mutapapa_Official_Discord_Server_Image.png?ex=68bcb83e&is=68bb66be&hm=f248257c26608d0ee69b8baab82f62aea768f15f090ad318617e68350fe3b5ac&"
 
-# ===== age-gate config (persisted) =====
+# ===== age-gate config =====
 CONFIG_FILE = "config.json"
 def load_config():
     try:
@@ -96,17 +94,16 @@ CONFIG = load_config()
 def parse_duration_to_seconds(s: str):
     s = s.strip().lower()
     m = re.fullmatch(r"(\d+)\s*([dhm])", s)
-    if not m:
-        return None
+    if not m: return None
     n, unit = int(m.group(1)), m.group(2)
-    return n * 24 * 3600 if unit == "d" else n * 3600 if unit == "h" else n * 60 if unit == "m" else None
+    return n*24*3600 if unit=="d" else n*3600 if unit=="h" else n*60 if unit=="m" else None
 def humanize_seconds(sec: int) -> str:
     if sec % (24*3600) == 0: return f"{sec // (24*3600)}d"
     if sec % 3600 == 0:      return f"{sec // 3600}h"
     if sec % 60 == 0:        return f"{sec // 60}m"
     return f"{sec}s"
 
-# ===== probation timers (simple file store) =====
+# ===== probation timers =====
 DATA_FILE = "join_times.json"
 def load_data():
     try:
@@ -119,14 +116,14 @@ def save_data(data):
         json.dump(data, f)
 join_times = load_data()
 
-# ===== Discord client / intents =====
+# ===== client =====
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 bot = discord.Client(intents=intents)
 
-# ===== Cross-trade / buy-sell detector =====
-LEET_MAP = str.maketrans({"$": "s", "@": "a", "0": "o", "1": "i", "3": "e", "5": "s", "7": "t"})
+# ===== cross-trade detector =====
+LEET_MAP = str.maketrans({"$":"s","@":"a","0":"o","1":"i","3":"e","5":"s","7":"t"})
 def normalize_text(s: str) -> str:
     s = s.lower().translate(LEET_MAP)
     s = re.sub(r"[\W_]+", " ", s)
@@ -152,16 +149,13 @@ CROSSTRADE_PATTERNS = [
 _report_cooldown_sec = 30
 _last_report_by_user = {}
 
-# ================== YouTube webhook (aiohttp) ==================
+# ================== YouTube webhook ==================
 app = web.Application()
 
 async def yt_webhook_handler(request: web.Request):
     if request.method == "GET":
         return web.Response(text=request.query.get("hub.challenge") or "ok")
-
     body = await request.read()
-
-    # Optional HMAC verification
     if YT_SECRET:
         sig = request.headers.get("X-Hub-Signature", "")
         try:
@@ -173,8 +167,6 @@ async def yt_webhook_handler(request: web.Request):
                     return web.Response(status=400, text="bad signature")
         except Exception:
             return web.Response(status=400, text="bad signature")
-
-    # Parse Atom XML
     try:
         root = ET.fromstring(body.decode("utf-8", errors="ignore"))
         ns = {"atom":"http://www.w3.org/2005/Atom","yt":"http://www.youtube.com/xml/schemas/2015"}
@@ -186,8 +178,6 @@ async def yt_webhook_handler(request: web.Request):
     except Exception as e:
         print(f"[yt-webhook] parse error: {e}")
         return web.Response(text="ok")
-
-    # Announce
     if vid:
         guild = bot.get_guild(GUILD_ID)
         if guild:
@@ -204,7 +194,6 @@ async def yt_webhook_handler(request: web.Request):
                 allowed = discord.AllowedMentions(roles=True, users=False, everyone=False)
                 await ch.send(content=role.mention, embed=embed, allowed_mentions=allowed)
                 print(f"[yt-webhook] announced {vid}")
-
     return web.Response(text="ok")
 
 async def health(_):
@@ -228,8 +217,7 @@ async def websub_subscribe(public_base_url: str):
     topic = f"https://www.youtube.com/feeds/videos.xml?channel_id={YT_CHANNEL_ID}"
     callback = f"{public_base_url.rstrip('/')}{YT_CALLBACK_PATH}"
     data = {"hub.mode":"subscribe","hub.topic":topic,"hub.callback":callback,"hub.verify":"async"}
-    if YT_SECRET:
-        data["hub.secret"] = YT_SECRET
+    if YT_SECRET: data["hub.secret"] = YT_SECRET
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(f"{YT_HUB}/subscribe", data=data, timeout=10) as resp:
@@ -241,14 +229,12 @@ async def websub_subscribe(public_base_url: str):
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} | latency={bot.latency:.3f}s")
-    # Web server for YouTube push
     asyncio.create_task(start_webserver())
     public_url = os.getenv("PUBLIC_BASE_URL","").rstrip("/")
     if public_url:
         asyncio.create_task(websub_subscribe(public_url))
     else:
         print("[yt-webhook] PUBLIC_BASE_URL not set; skipping subscription.")
-    # Start background loops
     promote_loop.start()
     x_posts_loop.start()
 
@@ -265,7 +251,7 @@ async def on_message(message: discord.Message):
         await message.channel.send("pong 🏓")
         return
 
-    # --- ADMIN: make the bot send a plain message as itself ---
+    # send as bot
     if clower.startswith("!send "):
         if not message.author.guild_permissions.administrator:
             await message.channel.send("❗ Admins only.")
@@ -277,7 +263,7 @@ async def on_message(message: discord.Message):
         await message.channel.send(text)
         return
 
-    # --- ADMIN: create the Reaction-Role message in REACTION_CHANNEL_ID ---
+    # create reaction-role message
     if clower.startswith("!sendreact "):
         if not message.author.guild_permissions.administrator:
             await message.channel.send("❗ Admins only.")
@@ -303,7 +289,7 @@ async def on_message(message: discord.Message):
         await message.channel.send(f"✅ Reaction-roles set on message ID `{sent.id}` in {rr_channel.mention}.")
         return
 
-    # admin: show min age
+    # age-gate helpers
     if clower == "!showminage":
         await message.channel.send(
             f"Age-gate is **{'ON' if CONFIG.get('age_gate_enabled', True) else 'OFF'}**, "
@@ -311,7 +297,6 @@ async def on_message(message: discord.Message):
         )
         return
 
-    # admin: toggle age gate
     if clower.startswith("!agegate "):
         if not message.author.guild_permissions.administrator:
             await message.channel.send("❗ Admins only.")
@@ -325,7 +310,6 @@ async def on_message(message: discord.Message):
             await message.channel.send("Usage: `!agegate on` or `!agegate off`")
         return
 
-    # admin: set min age
     if clower.startswith("!setminage"):
         if not message.author.guild_permissions.administrator:
             await message.channel.send("❗ Admins only.")
@@ -343,7 +327,6 @@ async def on_message(message: discord.Message):
         await message.channel.send(f"✅ Minimum account age set to **{humanize_seconds(sec)}**.")
         return
 
-    # test mod-log
     if clower == "!modlogtest":
         ch = message.guild.get_channel(MOD_LOG_CHANNEL_ID)
         if ch:
@@ -359,6 +342,25 @@ async def on_message(message: discord.Message):
         else:
             await message.channel.send("❗ MOD_LOG_CHANNEL_ID wrong or bot can’t see that channel.")
         return
+
+    # ---------- W/F/L auto-reaction (ONLY in WFL_CHANNEL_ID) ----------
+    if message.channel.id == WFL_CHANNEL_ID:
+        t = message.content.lower()
+        has_wfl = (
+            re.search(r"\bw\s*/\s*f\s*/\s*l\b", t) or                 # w/f/l
+            re.search(r"\bwin\b.*\bfair\b.*\bloss\b", t) or           # win ... fair ... loss
+            re.search(r"\bw\s+f\s+l\b", t) or                         # w f l
+            re.search(r"\bwfl\b", t) or                               # wfl
+            re.search(r"\bwin\s*[- ]\s*fair\s*[- ]\s*loss\b", t)      # win - fair - loss
+        )
+        if has_wfl:
+            try:
+                await message.add_reaction("🇼")
+                await message.add_reaction("🇫")
+                await message.add_reaction("🇱")
+            except Exception as e:
+                print(f"[wfl] failed to add reactions: {e}")
+        # don't return; let the cross-trade detector run too if applicable
 
     # --- cross-trade detector ---
     if message.channel.id == MOD_LOG_CHANNEL_ID:
@@ -467,13 +469,10 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
 
 @bot.event
 async def on_member_join(member: discord.Member):
-    # ignore bots; enforce only in your guild
     if member.bot or member.guild.id != GUILD_ID:
         return
     guild = member.guild
     now = datetime.now(timezone.utc)
-
-    # Account age gate
     if CONFIG.get("age_gate_enabled", True):
         acct_age_sec = (now - member.created_at).total_seconds()
         min_sec = int(CONFIG.get("min_account_age_sec", 7*24*3600))
@@ -508,7 +507,6 @@ async def on_member_join(member: discord.Member):
             save_data(join_times)
             return
 
-    # Normal path
     newcomer = guild.get_role(NEWCOMER_ROLE_ID)
     if newcomer:
         try:
@@ -519,7 +517,6 @@ async def on_member_join(member: discord.Member):
     gstore[str(member.id)] = now.isoformat()
     save_data(join_times)
 
-    # Welcome embed
     channel = guild.get_channel(WELCOME_CHANNEL_ID)
     if channel:
         embed = discord.Embed(
