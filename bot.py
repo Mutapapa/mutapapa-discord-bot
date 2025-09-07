@@ -41,6 +41,9 @@ def save_rr_store(d):
     with open(RR_STORE_FILE, "w", encoding="utf-8") as f:
         json.dump(d, f)
 
+# ===== Giveaways =====
+GIVEAWAYS_FILE = "giveaways.json"  # persistent state
+
 # ================== YOUR IDs / CONFIG ==================
 GUILD_ID = 1411205177880608831
 WELCOME_CHANNEL_ID = 1411946767414591538
@@ -82,6 +85,20 @@ def nitter_to_x(url: str) -> str:
     return url.replace("https://nitter.net", "https://x.com")
 
 BANNER_URL = "https://cdn.discordapp.com/attachments/1411930091109224479/1413654925602459769/Welcome_to_the_Mutapapa_Official_Discord_Server_Image.png?ex=68bcb83e&is=68bb66be&hm=f248257c26608d0ee69b8baab82f62aea768f15f090ad318617e68350fe3b5ac&"
+def load_giveaways():
+    try:
+        with open(GIVEAWAYS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            # message_id (str) -> dict{channel_id,int, ends_at, winners, title, desc, participants:[int], ended:bool}
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+def save_giveaways(d):
+    with open(GIVEAWAYS_FILE, "w", encoding="utf-8") as f:
+        json.dump(d, f)
+
+GIVEAWAYS = load_giveaways()
 
 # ===== age-gate config =====
 CONFIG_FILE = "config.json"
@@ -250,6 +267,109 @@ async def websub_subscribe(public_base_url: str):
     except Exception as e:
         print(f"[yt-webhook] subscribe error: {e}")
 
+from discord.ui import View, button
+import random
+
+class GiveawayView(View):
+    def __init__(self, message_id: int):
+        super().__init__(timeout=None)  # persistent until ended
+        self.message_id = message_id
+
+    @button(label="Enter", style=discord.ButtonStyle.primary, emoji="🎉", custom_id="gw_enter")
+    async def enter_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        mid = str(self.message_id)
+        gw = GIVEAWAYS.get(mid)
+        if not gw or gw.get("ended"):
+            return await interaction.response.send_message("This giveaway is closed.", ephemeral=True)
+        if interaction.user.bot:
+            return await interaction.response.send_message("Bots can’t enter.", ephemeral=True)
+
+        parts = set(gw.get("participants", []))
+        if interaction.user.id in parts:
+            return await interaction.response.send_message("You’re already in 🎉", ephemeral=True)
+
+        parts.add(interaction.user.id)
+        gw["participants"] = list(parts)
+        GIVEAWAYS[mid] = gw
+        save_giveaways(GIVEAWAYS)
+
+        await interaction.response.send_message("Entered! 🎉", ephemeral=True)
+
+    @button(label="View Participants", style=discord.ButtonStyle.secondary, emoji="👀", custom_id="gw_view")
+    async def view_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        mid = str(self.message_id)
+        gw = GIVEAWAYS.get(mid)
+        if not gw:
+            return await interaction.response.send_message("Giveaway not found.", ephemeral=True)
+
+        parts = gw.get("participants", [])
+        if not parts:
+            return await interaction.response.send_message("No participants yet.", ephemeral=True)
+
+        # Show as mentions in chunks to avoid hitting limits
+        mentions = [f"<@{uid}>" for uid in parts][:100]  # keep it short
+        txt = "Participants (" + str(len(parts)) + "):\n" + ", ".join(mentions)
+        await interaction.response.send_message(txt, ephemeral=True)
+
+async def schedule_giveaway_end(message_id: int, ends_at_unix: float):
+    # re-schedules after restarts
+    delay = max(0, ends_at_unix - asyncio.get_event_loop().time() + (asyncio.get_event_loop().time() - time()))
+    # simpler: sleep until wall time
+    await asyncio.sleep(max(0, ends_at_unix - time()))
+    await end_giveaway(message_id)
+
+async def end_giveaway(message_id: int):
+    mid = str(message_id)
+    gw = GIVEAWAYS.get(mid)
+    if not gw or gw.get("ended"):
+        return
+
+    channel = bot.get_channel(gw["channel_id"])
+    if not channel:
+        gw["ended"] = True
+        save_giveaways(GIVEAWAYS)
+        return
+    try:
+        msg = await channel.fetch_message(message_id)
+    except Exception:
+        msg = None
+
+    # pick winners
+    parts = [p for p in set(gw.get("participants", [])) if isinstance(p, int)]
+    winners_count = max(1, int(gw.get("winners", 1)))
+    if len(parts) == 0:
+        winners = []
+    else:
+        winners = random.sample(parts, k=min(winners_count, len(parts)))
+
+    # edit embed
+    embed = discord.Embed(title=gw.get("title") or "Giveaway", description=gw.get("desc") or "", color=0x5865F2)
+    embed.add_field(name="Winners", value=("None" if not winners else " ".join(f"<@{w}>" for w in winners)))
+    embed.set_footer(text="Giveaway ended")
+    view = GiveawayView(message_id)
+    for item in view.children:
+        item.disabled = True
+
+    if msg:
+        try:
+            await msg.edit(embed=embed, view=view)
+        except Exception:
+            pass
+
+    # announce in channel
+    try:
+        if winners:
+            await channel.send("🎉 **Winners:** " + " ".join(f"<@{w}>" for w in winners))
+        else:
+            await channel.send("No valid entries.")
+    except Exception:
+        pass
+
+    gw["ended"] = True
+    GIVEAWAYS[mid] = gw
+    save_giveaways(GIVEAWAYS)
+
+
 # ================== Discord events & commands ==================
 @bot.event
 async def on_ready():
@@ -264,7 +384,113 @@ async def on_ready():
     x_posts_loop.start()
 
 @bot.event
+async def on_ready():
+    # reattach views for active giveaways
+    for mid, gw in list(GIVEAWAYS.items()):
+        if not gw.get("ended") and gw.get("channel_id"):
+            bot.add_view(GiveawayView(int(mid)))
+            # re-schedule end if ends_at exists
+            ends_at = gw.get("ends_at")
+            if ends_at:
+                asyncio.create_task(schedule_giveaway_end(int(mid), ends_at))
+
+    print(f"Logged in as {bot.user} | latency={bot.latency:.3f}s")
+    # ... your existing on_ready code (start webserver, loops, etc.)
+
+
+@bot.event
 async def on_message(message: discord.Message):
+
+    # ===== GIVEAWAY COMMANDS =====
+    if clower.startswith("!gstart "):
+        if not message.author.guild_permissions.administrator:
+            await message.channel.send("❗ Admins only.")
+            return
+        # format: !gstart <duration> | <winners> | <title> | <description>
+        try:
+            _, rest = message.content.split(" ", 1)
+            parts = [p.strip() for p in rest.split("|")]
+            dur_s = parse_duration_to_seconds(parts[0])            # e.g. 1h, 30m, 2d
+            winners_count = int(parts[1])
+            title = parts[2]
+            desc = parts[3] if len(parts) > 3 else ""
+        except Exception:
+            return await message.channel.send(
+                "Usage: `!gstart <duration> | <winners> | <title> | <description>`\n"
+                "e.g. `!gstart 2h | 2 | Nitro Classic | Click Enter to join!`"
+            )
+
+        if not dur_s or dur_s <= 0 or winners_count < 1:
+            return await message.channel.send("❗ Bad duration or winners.")
+
+        ends_at = time() + dur_s
+        embed = discord.Embed(title=title, description=desc, color=0x5865F2)
+        embed.add_field(name="Duration", value=f"{parts[0]}")
+        embed.add_field(name="Winners", value=str(winners_count))
+        embed.set_footer(text="Press Enter to join • View Participants to see who’s in")
+
+        sent = await message.channel.send(embed=embed, view=GiveawayView(0))  # temp view, fix id right after
+        # Save state
+        mid = str(sent.id)
+        GIVEAWAYS[mid] = {
+            "channel_id": message.channel.id,
+            "ends_at": ends_at,
+            "winners": winners_count,
+            "title": title,
+            "desc": desc,
+            "participants": [],
+            "ended": False
+        }
+        save_giveaways(GIVEAWAYS)
+
+        # reattach view with correct message id (so custom_id grouping is stable)
+        view = GiveawayView(sent.id)
+        try:
+            await sent.edit(view=view)
+        except Exception:
+            pass
+
+        # schedule the ending
+        asyncio.create_task(schedule_giveaway_end(sent.id, ends_at))
+
+        return
+
+    if clower.startswith("!gend"):
+        if not message.author.guild_permissions.administrator:
+            await message.channel.send("❗ Admins only.")
+            return
+        # !gend <message_id>
+        try:
+            mid = message.content.split(maxsplit=1)[1].strip()
+            _ = int(mid)
+        except Exception:
+            return await message.channel.send("Usage: `!gend <message_id>`")
+
+        await end_giveaway(int(mid))
+        await message.channel.send("✅ Ended (or already ended).")
+        return
+
+    if clower.startswith("!greroll"):
+        if not message.author.guild_permissions.administrator:
+            await message.channel.send("❗ Admins only.")
+            return
+        # !greroll <message_id>
+        try:
+            mid = message.content.split(maxsplit=1)[1].strip()
+            _ = int(mid)
+        except Exception:
+            return await message.channel.send("Usage: `!greroll <message_id>`")
+
+        # mark not ended temporarily and call end again to pick new winners
+        gw = GIVEAWAYS.get(mid)
+        if not gw:
+            return await message.channel.send("Not found.")
+        gw["ended"] = False
+        save_giveaways(GIVEAWAYS)
+        await end_giveaway(int(mid))
+        await message.channel.send("✅ Rerolled.")
+        return
+
 
     # ---------- COUNTING CHANNEL RULES ----------
     if message.channel.id == COUNT_CHANNEL_ID and not message.author.bot:
