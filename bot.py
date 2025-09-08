@@ -26,6 +26,8 @@ WELCOME_CHANNEL_ID = 1411946767414591538
 NEWCOMER_ROLE_ID   = 1411957261009555536
 MEMBER_ROLE_ID     = 1411938410041708585
 MOD_LOG_CHANNEL_ID = 1413297073348018299
+SEASON_RESET_ANNOUNCE_CHANNEL_IDS = [1414000088790863874, 1411931034026643476, 1411930067994411139, 1411930091109224479, 1411930689460240395, 1414120740327788594]
+
 
 # Reaction Roles
 REACTION_CHANNEL_ID = 1414001588091093052
@@ -181,6 +183,8 @@ intents.members = True
 bot = discord.Client(intents=intents)
 
 # ================== DB (Supabase Postgres via asyncpg) ==================
+from urllib.parse import urlparse
+
 DB_URL = os.getenv("SUPABASE_DB_URL", "").strip()
 if not DB_URL:
     raise RuntimeError("SUPABASE_DB_URL is missing. Provide a postgresql:// DSN (not the https REST URL).")
@@ -196,8 +200,35 @@ if scheme not in ("postgresql", "postgres"):
 _pool: asyncpg.Pool | None = None
 
 async def db_init():
+    """Create pool and run idempotent migrations so loops don’t race."""
     global _pool
     _pool = await asyncpg.create_pool(dsn=DB_URL, min_size=1, max_size=5)
+
+    async with _pool.acquire() as con:
+        # users table
+        await con.execute("""
+        CREATE TABLE IF NOT EXISTS muta_users (
+            user_id BIGINT PRIMARY KEY,
+            cash BIGINT NOT NULL DEFAULT 0,
+            last_earn_ts TIMESTAMPTZ,
+            today_earned BIGINT NOT NULL DEFAULT 0,
+            bug_rewards_this_month INTEGER NOT NULL DEFAULT 0
+        );
+        """)
+
+        # drops table
+        await con.execute("""
+        CREATE TABLE IF NOT EXISTS muta_drops (
+            id BIGSERIAL PRIMARY KEY,
+            channel_id BIGINT NOT NULL,
+            message_id BIGINT NOT NULL UNIQUE,
+            phrase TEXT NOT NULL,
+            amount INTEGER NOT NULL,
+            claimed_by BIGINT,
+            claimed_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """)
 
 async def db_fetchrow(query, *args):
     async with _pool.acquire() as con:
@@ -210,131 +241,6 @@ async def db_execute(query, *args):
 async def db_fetch(query, *args):
     async with _pool.acquire() as con:
         return await con.fetch(query, *args)
-
-# ========= ECONOMY DB HELPERS =========
-
-async def db_migrate():
-    await db_execute("""
-    create table if not exists muta_users(
-      user_id bigint primary key,
-      cash bigint not null default 0,
-      last_earn_ts timestamptz,
-      today_earned integer not null default 0,
-      bug_rewards_this_month integer not null default 0
-    );
-    """)
-    await db_execute("""
-    create table if not exists muta_drops(
-      id bigserial primary key,
-      channel_id bigint not null,
-      message_id bigint not null,
-      phrase text not null,
-      amount integer not null,
-      created_at timestamptz not null default now(),
-      claimed_by bigint,
-      claimed_at timestamptz
-    );
-    """)
-async def ensure_user(uid: int):
-    await db_execute("""
-        INSERT INTO muta_users(user_id)
-        VALUES($1)
-        ON CONFLICT (user_id) DO NOTHING
-    """, uid)
-
-def same_local_day(ts: datetime, now: datetime) -> bool:
-    return ts.astimezone(TZ).date() == now.astimezone(TZ).date()
-
-# earn tick with cooldown + daily cap; includes tier bonus; respects double-cash
-async def earn_for_message(uid: int, now: datetime, msg_len: int) -> int:
-    await ensure_user(uid)
-    row = await db_fetchrow("""
-        SELECT cash, last_earn_ts, today_earned
-        FROM muta_users WHERE user_id=$1
-    """, uid)
-    cash = row["cash"]
-    last_ts = row["last_earn_ts"]
-    today  = row["today_earned"]
-
-    # reset daily tracker if day changed
-    if last_ts and not same_local_day(last_ts, now):
-        today = 0
-
-    # cooldown
-    if last_ts and (now - last_ts).total_seconds() < EARN_COOLDOWN_SEC:
-        return 0
-
-    # base + bonus (still subject to the cap)
-    base = EARN_PER_TICK * (2 if DOUBLE_CASH else 1)
-    bonus = tier_bonus(msg_len)
-    amt = base + bonus
-
-    if today >= DAILY_CAP:
-        return 0
-    if today + amt > DAILY_CAP:
-        amt = max(0, DAILY_CAP - today)
-    if amt == 0:
-        return 0
-
-    new_cash = cash + amt
-    new_today = today + amt
-
-    await db_execute("""
-        UPDATE muta_users
-        SET cash=$1, last_earn_ts=$2, today_earned=$3
-        WHERE user_id=$4
-    """, new_cash, now, new_today, uid)
-
-    # simple level check
-    old_level = (cash // CASH_PER_LEVEL)
-    new_level = (new_cash // CASH_PER_LEVEL)
-    if new_level > old_level:
-        # you can announce or assign roles here later
-        pass
-
-    return amt
-
-async def deduct_cash(uid: int, amount: int) -> int:
-    await ensure_user(uid)
-    row = await db_fetchrow("SELECT cash FROM muta_users WHERE user_id=$1", uid)
-    cash = row["cash"]
-    new_cash = max(0, cash - max(0, amount))
-    await db_execute("UPDATE muta_users SET cash=$1 WHERE user_id=$2", new_cash, uid)
-    return new_cash
-
-async def add_cash(uid: int, amount: int) -> int:
-    await ensure_user(uid)
-    row = await db_fetchrow("SELECT cash FROM muta_users WHERE user_id=$1", uid)
-    cash = row["cash"]
-    new_cash = cash + max(0, amount)
-    await db_execute("UPDATE muta_users SET cash=$1 WHERE user_id=$2", new_cash, uid)
-    return new_cash
-
-async def can_bug_reward(uid: int) -> bool:
-    await ensure_user(uid)
-    row = await db_fetchrow("SELECT bug_rewards_this_month FROM muta_users WHERE user_id=$1", uid)
-    return int(row["bug_rewards_this_month"] or 0) < BUG_REWARD_LIMIT_PER_MONTH
-
-async def mark_bug_reward(uid: int):
-    await ensure_user(uid)
-    await db_execute("""
-        UPDATE muta_users SET bug_rewards_this_month = bug_rewards_this_month + 1
-        WHERE user_id=$1
-    """, uid)
-
-async def monthly_reset():
-    await db_execute("""
-        UPDATE muta_users
-        SET cash=0, today_earned=0, bug_rewards_this_month=0
-    """)
-
-async def leaderboard_top(limit=10):
-    rows = await db_fetch("""
-        SELECT user_id, cash FROM muta_users
-        ORDER BY cash DESC, user_id ASC
-        LIMIT $1
-    """, limit)
-    return rows
 
 # ================== TEXT NORMALIZATION / DETECTOR ==================
 LEET_MAP = str.maketrans({"$":"s","@":"a","0":"o","1":"i","3":"e","5":"s","7":"t"})
@@ -1325,28 +1231,38 @@ async def drops_loop():
 @tasks.loop(minutes=1)
 @tasks.loop(minutes=1)
 @tasks.loop(minutes=1)
+@tasks.loop(minutes=1)
 async def monthly_reset_loop():
     """Reset ONLY at the end of the month: last day 23:59 America/Edmonton."""
     now = datetime.now(tz=TZ)
     next_minute = now + timedelta(minutes=1)
     if now.hour == 23 and now.minute == 59 and next_minute.day == 1:
         print("[season] monthly reset running…")
+        # Grab final standings before wiping
+        rows = await leaderboard_top(10)
         await monthly_reset()
+
         try:
             guild = bot.get_guild(GUILD_ID)
-            ch = guild.get_channel(LEADERBOARD_CHANNEL_ID) if guild else None
-            if ch:
-                rows = await leaderboard_top(10)
+            if guild:
+                desc = None
                 if rows:
-                    desc = [f"**{idx}.** <@{r['user_id']}> — {r['cash']} cash"
-                            for idx, r in enumerate(rows, start=1)]
-                    embed = discord.Embed(
-                        title="🏁 Season ended — Final Top 10",
-                        description="\n".join(desc),
-                        color=0xF39C12
+                    desc = "\n".join(
+                        f"**{idx}.** <@{r['user_id']}> — {r['cash']} cash"
+                        for idx, r in enumerate(rows, start=1)
                     )
-                    await ch.send(embed=embed)
-                await ch.send("🧹 Balances reset. New season starts now — good luck!")
+                for cid in SEASON_RESET_ANNOUNCE_CHANNEL_IDS:
+                    ch = guild.get_channel(cid)
+                    if not ch:
+                        continue
+                    if desc:
+                        embed = discord.Embed(
+                            title="🏁 Season ended — Final Top 10",
+                            description=desc,
+                            color=0xF39C12
+                        )
+                        await ch.send(embed=embed)
+                    await ch.send("🧹 Balances reset. New season starts now — good luck!")
         except Exception:
             pass
 
