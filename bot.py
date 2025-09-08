@@ -1256,21 +1256,44 @@ async def x_posts_loop():
         pass
 
 @tasks.loop(minutes=5)
+@tasks.loop(minutes=5)
 async def drops_loop():
     """Ensure up to 4 drops per local day in CASH_DROP_CHANNEL_ID."""
     guild = bot.get_guild(GUILD_ID)
-    if not guild: return
+    if not guild:
+        return
     ch = guild.get_channel(CASH_DROP_CHANNEL_ID)
-    if not ch: return
+    if not ch:
+        return
+
+    # Guard: ensure table exists in case this loop beat db_init() migrations
+    try:
+        await db_execute("""
+        CREATE TABLE IF NOT EXISTS muta_drops (
+            id BIGSERIAL PRIMARY KEY,
+            channel_id BIGINT NOT NULL,
+            message_id BIGINT NOT NULL UNIQUE,
+            phrase TEXT NOT NULL,
+            amount INTEGER NOT NULL,
+            claimed_by BIGINT,
+            claimed_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """)
+    except Exception:
+        return  # if DB isn’t ready yet, just try again next tick
 
     now = datetime.now(tz=TZ)
     start = datetime(now.year, now.month, now.day, tzinfo=TZ)
 
-    # count today's drops
-    rows = await db_fetch("""
-        SELECT COUNT(*) AS c FROM muta_drops
-        WHERE channel_id=$1 AND created_at >= $2
-    """, CASH_DROP_CHANNEL_ID, start)
+    try:
+        rows = await db_fetch("""
+            SELECT COUNT(*) AS c FROM muta_drops
+            WHERE channel_id=$1 AND created_at >= $2
+        """, CASH_DROP_CHANNEL_ID, start)
+    except Exception:
+        return
+
     today_count = rows[0]["c"] if rows else 0
     if today_count >= DROPS_PER_DAY:
         return
@@ -1286,55 +1309,46 @@ async def drops_loop():
     except Exception:
         return
 
-    await db_execute("""
-        INSERT INTO muta_drops(channel_id, message_id, phrase, amount, created_at)
-        VALUES($1,$2,$3,$4, NOW())
-    """, CASH_DROP_CHANNEL_ID, msg.id, phrase.lower(), DROP_AMOUNT)
+    try:
+        await db_execute("""
+            INSERT INTO muta_drops(channel_id, message_id, phrase, amount, created_at)
+            VALUES($1,$2,$3,$4, NOW())
+        """, CASH_DROP_CHANNEL_ID, msg.id, phrase.lower(), DROP_AMOUNT)
+    except Exception:
+        # If the insert failed for a transient reason, delete the message so users don't see a dead drop
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+        return
 
+@tasks.loop(minutes=1)
 @tasks.loop(minutes=1)
 @tasks.loop(minutes=1)
 async def monthly_reset_loop():
-    """
-    Run once on the last calendar day of the month at 23:59 (America/Edmonton).
-    Uses muta_meta to ensure it only runs once per month even if the bot restarts.
-    """
+    """Reset ONLY at the end of the month: last day 23:59 America/Edmonton."""
     now = datetime.now(tz=TZ)
-    # Only proceed if it's the last day-of-month and it's 23:59 local time
-    if now.day != last_day_of_month(now) or now.hour != 23 or now.minute != 59:
-        return
-
-    # Has this month already been reset?
-    ym_key = f"{now.year:04d}-{now.month:02d}"     # e.g., "2025-09"
-    last_done = await db_get_meta("season_reset_month")
-    if last_done == ym_key:
-        return  # already done this month
-
-    print("[season] monthly reset running…")
-    # (Optional) announce final standings before reset
-    try:
-        guild = bot.get_guild(GUILD_ID)
-        ch = guild.get_channel(LEADERBOARD_CHANNEL_ID) if guild else None
-        if ch:
-            rows = await leaderboard_top(10)
-            if rows:
-                desc = []
-                for idx, r in enumerate(rows, start=1):
-                    desc.append(f"**{idx}.** <@{r['user_id']}> — {r['cash']} cash")
-                embed = discord.Embed(
-                    title="🏁 Season ended — Final Top 10",
-                    description="\n".join(desc),
-                    color=0xF39C12
-                )
-                await ch.send(embed=embed)
-            await ch.send("🧹 Balances reset. New season starts now — good luck!")
-    except Exception:
-        pass
-
-    # Do the actual reset
-    await monthly_reset()
-
-    # Mark done so we won’t run twice this month
-    await db_set_meta("season_reset_month", ym_key)
+    next_minute = now + timedelta(minutes=1)
+    if now.hour == 23 and now.minute == 59 and next_minute.day == 1:
+        print("[season] monthly reset running…")
+        await monthly_reset()
+        try:
+            guild = bot.get_guild(GUILD_ID)
+            ch = guild.get_channel(LEADERBOARD_CHANNEL_ID) if guild else None
+            if ch:
+                rows = await leaderboard_top(10)
+                if rows:
+                    desc = [f"**{idx}.** <@{r['user_id']}> — {r['cash']} cash"
+                            for idx, r in enumerate(rows, start=1)]
+                    embed = discord.Embed(
+                        title="🏁 Season ended — Final Top 10",
+                        description="\n".join(desc),
+                        color=0xF39C12
+                    )
+                    await ch.send(embed=embed)
+                await ch.send("🧹 Balances reset. New season starts now — good luck!")
+        except Exception:
+            pass
 
 # ================== RUN ==================
 def main():
