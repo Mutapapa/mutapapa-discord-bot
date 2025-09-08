@@ -1,4 +1,4 @@
-discord.py
-aiohttp
-asyncpg
-python-dateutil
+discord.py==2.4.0
+aiohttp==3.9.5
+asyncpg==0.29.0
+python-dateutil==2.9.0.post0

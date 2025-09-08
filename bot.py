@@ -212,6 +212,29 @@ async def db_fetch(query, *args):
         return await con.fetch(query, *args)
 
 # ========= ECONOMY DB HELPERS =========
+
+async def db_migrate():
+    await db_execute("""
+    create table if not exists muta_users(
+      user_id bigint primary key,
+      cash bigint not null default 0,
+      last_earn_ts timestamptz,
+      today_earned integer not null default 0,
+      bug_rewards_this_month integer not null default 0
+    );
+    """)
+    await db_execute("""
+    create table if not exists muta_drops(
+      id bigserial primary key,
+      channel_id bigint not null,
+      message_id bigint not null,
+      phrase text not null,
+      amount integer not null,
+      created_at timestamptz not null default now(),
+      claimed_by bigint,
+      claimed_at timestamptz
+    );
+    """)
 async def ensure_user(uid: int):
     await db_execute("""
         INSERT INTO muta_users(user_id)
@@ -519,6 +542,34 @@ async def end_giveaway(message_id: int):
     save_giveaways(GIVEAWAYS)
 
 # ================== HELPERS ==================
+
+# --- simple meta storage for one-off flags (season resets, etc.) ---
+async def db_get_meta(key: str) -> str | None:
+    row = await db_fetchrow("select value from muta_meta where key=$1", key)
+    return row["value"] if row and row["value"] is not None else None
+
+async def db_set_meta(key: str, value: str) -> None:
+    await db_execute("""
+        insert into muta_meta(key, value)
+        values($1, $2)
+        on conflict (key) do update set value = excluded.value
+    """, key, value)
+
+def last_day_of_month(dt: datetime) -> int:
+    # dt is timezone-aware (TZ). Compute the last day number (28–31).
+    nxt = (dt.replace(day=28) + timedelta(days=4))  # definitely next month
+    return (nxt - timedelta(days=nxt.day)).day
+
+import html
+TWEET_LINK_RE = re.compile(r"/" + re.escape(X_USERNAME) + r"/status/(\d+)")
+def nitter_latest_id_from_html(text: str) -> str | None:
+    """
+    Given the plain-text mirror of a Nitter user page, return the first tweet ID we find.
+    We look for '/<user>/status/<digits>'.
+    """
+    m = TWEET_LINK_RE.search(text)
+    return m.group(1) if m else None
+
 def parse_duration_to_seconds(s: str):
     # supports "10m", "1h", "2d" and also "0h 1m", "1h 30m"
     s = s.strip().lower()
@@ -602,6 +653,10 @@ class BugApproveView(View):
 # ================== DISCORD EVENTS ==================
 @bot.event
 async def on_ready():
+
+await db_init()
+await db_migrate()
+
     print(f"Logged in as {bot.user} | latency={bot.latency:.3f}s")
     await db_init()
 
@@ -1100,75 +1155,94 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
 @tasks.loop(minutes=2)
 async def x_posts_loop():
     guild = bot.get_guild(GUILD_ID)
-    if not guild: return
-    ch = guild.get_channel(X_ANNOUNCE_CHANNEL_ID)
-    if not ch: return
-
-    feeds = [X_RSS_URL] + [u for u in X_RSS_FALLBACKS if u != X_RSS_URL]
-    xml = None
-    async with aiohttp.ClientSession(headers={"User-Agent":"Mozilla/5.0"}) as session:
-        for url in feeds:
-            try:
-                async with session.get(url, timeout=12) as resp:
-                    if resp.status == 200:
-                        xml = await resp.text()
-                        break
-                    else:
-                        print(f"[x] rss status {resp.status} from {url}")
-            except Exception as e:
-                print(f"[x] fetch error from {url}: {e}")
-
-    if not xml:
+    if not guild:
         return
-
-    try:
-        root = ET.fromstring(xml)
-        channel = root.find("./channel")
-        items = channel.findall("item") if channel is not None else []
-        if not items: return
-    except Exception as e:
-        print(f"[x] parse error: {e}")
+    ch = guild.get_channel(X_ANNOUNCE_CHANNEL_ID)
+    if not ch:
         return
 
     cache = load_x_cache()
     last_guid = cache.get("last_guid")
-    new_items = []
-    for it in items:
-        guid = (it.findtext("guid") or it.findtext("link") or "").strip()
-        if not guid:
-            continue
-        if guid == last_guid:
-            break
-        new_items.append(it)
 
-    if not new_items:
+    # 1) Try RSS first (some Nitter instances disable it; we fall back if so)
+    feeds = [X_RSS_URL] + [u for u in X_RSS_FALLBACKS if u != X_RSS_URL]
+    announced = False
+    try:
+        xml = None
+        async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
+            for url in feeds:
+                try:
+                    async with session.get(url, timeout=10) as resp:
+                        if resp.status == 200:
+                            xml = await resp.text()
+                            break
+                except Exception:
+                    pass
+
+        if xml:
+            try:
+                root = ET.fromstring(xml)
+                channel = root.find("./channel")
+                items = channel.findall("item") if channel is not None else []
+                if items:
+                    # newest first in RSS
+                    item = items[0]
+                    guid = (item.findtext("guid") or item.findtext("link") or "").strip()
+                    title = (item.findtext("title") or "").strip()
+                    link  = (item.findtext("link")  or "").strip()
+                    if guid and guid != last_guid:
+                        x_link = nitter_to_x(link) if link else None
+                        embed = discord.Embed(
+                            title=f"New X post by @{X_USERNAME}",
+                            description=title[:4000] or "New post",
+                            url=x_link,
+                            color=0x1DA1F2
+                        )
+                        await ch.send(embed=embed)
+                        save_x_cache({"last_guid": guid})
+                        announced = True
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    if announced:
         return
 
-    new_items.reverse()
-    latest_guid = last_guid
-    for it in new_items:
-        title = (it.findtext("title") or "").strip()
-        link  = (it.findtext("link") or "").strip()
-        pubdate = (it.findtext("pubDate") or "").strip()
-        x_link = nitter_to_x(link) if link else None
-        embed = discord.Embed(
-            title=f"New X post by @{X_USERNAME}",
-            description=title[:4000] or "New post",
-            url=x_link,
-            color=0x1DA1F2
-        )
-        if pubdate:
-            embed.set_footer(text=pubdate)
-        try:
-            await ch.send(embed=embed)
-        except Exception:
-            pass
-        guid = (it.findtext("guid") or it.findtext("link") or "").strip()
-        if guid:
-            latest_guid = guid
-    if latest_guid and latest_guid != last_guid:
-        save_x_cache({"last_guid": latest_guid})
-        print(f"[x] announced {len(new_items)} new post(s)")
+    # 2) Fallback: parse the Nitter HTML via a read-only text mirror.
+    # Using r.jina.ai avoids Cloudflare & JS; returns plain text of the page.
+    # Example URL it fetches: https://r.jina.ai/http://nitter.net/<user>
+    try:
+        mirror_url = f"https://r.jina.ai/http://nitter.net/{X_USERNAME}"
+        async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
+            async with session.get(mirror_url, timeout=10) as resp:
+                if resp.status != 200:
+                    return
+                text = await resp.text()
+    except Exception:
+        return
+
+    tweet_id = nitter_latest_id_from_html(text)
+    if not tweet_id:
+        return
+
+    guid = f"nitter:{tweet_id}"
+    if guid == last_guid:
+        return
+
+    # Post a basic embed linking to the canonical X URL
+    x_link = f"https://x.com/{X_USERNAME}/status/{tweet_id}"
+    embed = discord.Embed(
+        title=f"New X post by @{X_USERNAME}",
+        description="(Auto-detected from Nitter page)",
+        url=x_link,
+        color=0x1DA1F2
+    )
+    try:
+        await ch.send(embed=embed)
+        save_x_cache({"last_guid": guid})
+    except Exception:
+        pass
 
 @tasks.loop(minutes=5)
 async def drops_loop():
@@ -1207,31 +1281,49 @@ async def drops_loop():
     """, CASH_DROP_CHANNEL_ID, msg.id, phrase.lower(), DROP_AMOUNT)
 
 @tasks.loop(minutes=1)
+@tasks.loop(minutes=1)
 async def monthly_reset_loop():
-    """At 23:59 Edmonton time, reset all balances for the new month."""
+    """
+    Run once on the last calendar day of the month at 23:59 (America/Edmonton).
+    Uses muta_meta to ensure it only runs once per month even if the bot restarts.
+    """
     now = datetime.now(tz=TZ)
-    if now.hour == 23 and now.minute == 59:
-        print("[season] monthly reset running…")
-        # optional: announce standings before reset
-        try:
-            guild = bot.get_guild(GUILD_ID)
-            ch = guild.get_channel(LEADERBOARD_CHANNEL_ID) if guild else None
-            if ch:
-                rows = await leaderboard_top(10)
-                if rows:
-                    desc = []
-                    for idx, r in enumerate(rows, start=1):
-                        desc.append(f"**{idx}.** <@{r['user_id']}> — {r['cash']} cash")
-                    embed = discord.Embed(
-                        title="🏁 Season ended — Final Top 10",
-                        description="\n".join(desc),
-                        color=0xF39C12
-                    )
-                    await ch.send(embed=embed)
-                await ch.send("🧹 Balances reset. New season starts now — good luck!")
-        except Exception:
-            pass
-        await monthly_reset()
+    # Only proceed if it's the last day-of-month and it's 23:59 local time
+    if now.day != last_day_of_month(now) or now.hour != 23 or now.minute != 59:
+        return
+
+    # Has this month already been reset?
+    ym_key = f"{now.year:04d}-{now.month:02d}"     # e.g., "2025-09"
+    last_done = await db_get_meta("season_reset_month")
+    if last_done == ym_key:
+        return  # already done this month
+
+    print("[season] monthly reset running…")
+    # (Optional) announce final standings before reset
+    try:
+        guild = bot.get_guild(GUILD_ID)
+        ch = guild.get_channel(LEADERBOARD_CHANNEL_ID) if guild else None
+        if ch:
+            rows = await leaderboard_top(10)
+            if rows:
+                desc = []
+                for idx, r in enumerate(rows, start=1):
+                    desc.append(f"**{idx}.** <@{r['user_id']}> — {r['cash']} cash")
+                embed = discord.Embed(
+                    title="🏁 Season ended — Final Top 10",
+                    description="\n".join(desc),
+                    color=0xF39C12
+                )
+                await ch.send(embed=embed)
+            await ch.send("🧹 Balances reset. New season starts now — good luck!")
+    except Exception:
+        pass
+
+    # Do the actual reset
+    await monthly_reset()
+
+    # Mark done so we won’t run twice this month
+    await db_set_meta("season_reset_month", ym_key)
 
 # ================== RUN ==================
 def main():
