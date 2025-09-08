@@ -654,31 +654,42 @@ class BugApproveView(View):
 @bot.event
 async def on_ready():
 
-await db_init()
-await db_migrate()
+async def db_init():
+    global _pool
+    _pool = await asyncpg.create_pool(dsn=DB_URL, min_size=1, max_size=5)
 
-    print(f"Logged in as {bot.user} | latency={bot.latency:.3f}s")
-    await db_init()
+    # --- AUTO-MIGRATIONS (creates tables if they don't exist) ---
+    async with _pool.acquire() as con:
+        # Users table
+        await con.execute("""
+        CREATE TABLE IF NOT EXISTS muta_users (
+            user_id BIGINT PRIMARY KEY,
+            cash INTEGER NOT NULL DEFAULT 0,
+            last_earn_ts TIMESTAMPTZ,
+            today_earned INTEGER NOT NULL DEFAULT 0,
+            bug_rewards_this_month INTEGER NOT NULL DEFAULT 0
+        );
+        """)
 
-    # Web server for YT push
-    asyncio.create_task(start_webserver())
-    public_url = os.getenv("PUBLIC_BASE_URL","").rstrip("/")
-    if public_url:
-        asyncio.create_task(websub_subscribe(public_url))
-    else:
-        print("[yt-webhook] PUBLIC_BASE_URL not set; skipping subscription.")
+        # Drops table
+        await con.execute("""
+        CREATE TABLE IF NOT EXISTS muta_drops (
+            id BIGSERIAL PRIMARY KEY,
+            channel_id BIGINT NOT NULL,
+            message_id BIGINT NOT NULL UNIQUE,
+            phrase TEXT NOT NULL,
+            amount INTEGER NOT NULL,
+            claimed_by BIGINT,
+            claimed_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """)
 
-    # reattach giveaway views and timers
-    for mid, gw in list(GIVEAWAYS.items()):
-        if not gw.get("ended") and gw.get("channel_id"):
-            bot.add_view(GiveawayView(int(mid)))
-            ends_at = gw.get("ends_at")
-            if ends_at:
-                asyncio.create_task(schedule_giveaway_end(int(mid), ends_at))
-
-    x_posts_loop.start()
-    drops_loop.start()
-    monthly_reset_loop.start()
+        # Helpful indexes
+        await con.execute("""
+        CREATE INDEX IF NOT EXISTS idx_muta_drops_created_at
+            ON muta_drops (created_at);
+        """)
 
 # ================== MESSAGE HANDLING ==================
 @bot.event
