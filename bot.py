@@ -823,9 +823,10 @@ async def on_message(message: discord.Message):
     clower  = content.lower()
 
     # help
-    if clower in ("!commands", "!help"):
-        await message.channel.send(embed=build_commands_embed(message.author))
-        return
+if clower in ("!commands", "!help"):
+    await message.channel.send(embed=build_commands_embed(message.author))
+    await delete_command_msg()
+    return
 
     async def delete_command_msg():
         try:
