@@ -5,8 +5,9 @@ import json
 import re
 import hmac
 import hashlib
-import xml.etree.ElementTree as ET
+import html
 import random
+import xml.etree.ElementTree as ET
 from time import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -25,11 +26,9 @@ GUILD_ID = 1411205177880608831
 WELCOME_CHANNEL_ID = 1411946767414591538
 NEWCOMER_ROLE_ID   = 1411957261009555536
 MEMBER_ROLE_ID     = 1411938410041708585
-
-# Mod logs (rule detector / cross-trade alerts land here)
 MOD_LOG_CHANNEL_ID = 1413297073348018299
 
-# Monthly-reset announcements go to all of these:
+# Channels to announce season resets
 SEASON_RESET_ANNOUNCE_CHANNEL_IDS = [
     1414000088790863874,
     1411931034026643476,
@@ -38,12 +37,6 @@ SEASON_RESET_ANNOUNCE_CHANNEL_IDS = [
     1411930689460240395,
     1414120740327788594,
 ]
-
-# Bug review (where !bugreport is posted with Approve/Reject buttons)
-BUG_REVIEW_CHANNEL_ID = 1414124214956593242
-
-# Penalty approvals (Yes/No buttons for cash deduction)
-PENALTY_CHANNEL_ID = 1414124795418640535
 
 # Reaction Roles
 REACTION_CHANNEL_ID = 1414001588091093052
@@ -62,18 +55,11 @@ WFL_CHANNEL_ID = 1411931034026643476
 COUNT_CHANNEL_ID = 1414051875329802320
 COUNT_STATE_FILE = "count_state.json"
 
-# Channels to monitor for rule-breaking keywords (detector)
+# Cross-trade detector monitor list
 MONITORED_CHANNEL_IDS = [
     1411930067994411139, 1411930091109224479, 1411930638260502638,
     1411930689460240395, 1411931034026643476
 ]
-
-# Who can see Admin/Mods commands in !help/!commands
-COMMANDS_ADMIN_ROLE_IDS = {
-    1413663966349234320,
-    1411940485005578322,
-    1413991410901713088,
-}
 
 # YouTube (WebSub push)
 YT_CHANNEL_ID          = "UCSLxLMfxnFRxyhNOZMy4i9w"
@@ -83,7 +69,7 @@ YT_CALLBACK_PATH       = "/yt/webhook"
 YT_HUB                 = "https://pubsubhubbub.appspot.com"
 YT_SECRET              = "mutapapa-youtube"
 
-# X / Twitter (RSS via Nitter/Bridge) — multiple fallbacks
+# X / Twitter via Nitter/Bridge
 X_USERNAME = "Real_Mutapapa"
 X_RSS_FALLBACKS = [
     f"https://nitter.net/{X_USERNAME}/rss",
@@ -94,15 +80,19 @@ X_RSS_URL = os.getenv("X_RSS_URL") or X_RSS_FALLBACKS[0]
 X_ANNOUNCE_CHANNEL_ID = 1414000975680897128
 X_CACHE_FILE = "x_last_item.json"
 
-# Banner image
+# Banner
 BANNER_URL = "https://cdn.discordapp.com/attachments/1411930091109224479/1413654925602459769/Welcome_to_the_Mutapapa_Official_Discord_Server_Image.png?ex=68bcb83e&is=68bb66be&hm=f248257c26608d0ee69b8baab82f62aea768f15f090ad318617e68350fe3b5ac&"
+
+# Bug review + penalty approvals
+BUGS_REVIEW_CHANNEL_ID = 1414124214956593242
+PENALTY_CHANNEL_ID     = 1414124795418640535  # rule-break penalty confirm buttons
 
 # Cash drop announcements channel
 CASH_DROP_CHANNEL_ID = 1414120740327788594
 
-# Optional: nice places to send bot announcements/leaderboard
+# Helpful channels
 CASH_ANNOUNCE_CHANNEL_ID   = 1414124134903844936
-LEADERBOARD_CHANNEL_ID     = 1414124214956593242
+LEADERBOARD_CHANNEL_ID     = 1414124214956593242  # (also your bug review channel; okay to share)
 
 # Age Gate defaults (persisted to config.json)
 CONFIG_FILE = "config.json"
@@ -110,69 +100,56 @@ CONFIG_FILE = "config.json"
 # Giveaways (persisted)
 GIVEAWAYS_FILE = "giveaways.json"
 
-# Level role mappings (persisted in DB)
-# Use !setlevelrole and !listlevelroles to manage
-
 # Edmonton time
 TZ = ZoneInfo("America/Edmonton")
 
 # ================== ECONOMY RULES ==================
-# message earning
 EARN_CHANNEL_IDS = [
     1411930638260502638,1411486271464935456,1413297073348018299,1411935203953217566,
     1411435784250331288,1412144563144888452,1411931216608755782,1414000975680897128,
     1411433941403177054,1411931171671117854,1411946767414591538,1413999346592256050,
     1414001588091093052
 ]
-EARN_COOLDOWN_SEC = 180          # 3 minutes
-EARN_PER_TICK     = 200          # base
-DAILY_CAP         = 2000         # (base + tier bonus) per day; random drops excluded
-DOUBLE_CASH       = False        # toggled by !doublecash on/off
+EARN_COOLDOWN_SEC = 180   # 3 minutes
+EARN_PER_TICK     = 200
+DAILY_CAP         = 2000
+DOUBLE_CASH       = False
 
-# tiered message-length bonus per tick (included in daily cap)
 def tier_bonus(msg_len: int) -> int:
     if msg_len <= 9: return 0
     if msg_len <= 49: return 50
     if msg_len <= 99: return 80
     return 100
 
-# random drops (4 per local day)
-DROPS_PER_DAY     = 4
+# Random drops — scheduled at random times across the full day
+DROPS_PER_DAY     = 4      # the scheduler will randomly choose 3 or 4
 DROP_AMOUNT       = 225
-DROP_WORD_COUNT   = 4  # "!cash <word1> <word2> <word3> <word4>"
+DROP_WORD_COUNT   = 4
 
-# bug reward
+# Bug reward
 BUG_REWARD_AMOUNT = 350
-BUG_REWARD_LIMIT_PER_MONTH = 2  # per user
-BUGS_CHANNEL_ID = 0  # (unused placeholder, set if you create a dedicated submit channel)
+BUG_REWARD_LIMIT_PER_MONTH = 2
 
-# levels: +1 level per 3000 cash (cosmetic; you’ll map roles yourself later)
-CASH_PER_LEVEL = 3000
+# ================== LEVEL ROLES (activity-based) ==================
+# Your provided IDs (note: last two are identical; that’s okay—both will resolve to the same role if so)
+ROLE_ROOKIE      = 1414817524557549629  # Rookie
+ROLE_SQUAD       = 1414818303028891731  # Squad Member
+ROLE_SPECIALIST  = 1414818845541138493  # Specialist
+ROLE_OPERATIVE   = 1414819588448718880  # Operative
+ROLE_LEGEND      = 1414819897602474057  # Legend (same ID as Operative per your message)
 
-# ================== RULE DETECTOR (keywords & patterns) ==================
-BUY_SELL_WORDS = {
-    "buy", "sell", "selling", "trading", "trade", "cross trade", "cross-trade",
-    "paypal", "venmo", "cashapp", "btc", "crypto", "robux", "gift card", "giftcard",
-    "real money", "rm", "usd", "nzd", "cad", "aud", "£", "$", "€"
-}
-CROSSTRADE_HINTS = {
-    "dm me price", "dm for price", "willing to pay", "offer cash", "cash ready",
-    "outside server", "dms open", "real life money", "irl money"
-}
-CROSSTRADE_PATTERNS = [
-    re.compile(r"\b\d+\s*(usd|cad|aud|nzd|eur|gbp|\$|€|£)\b", re.I),
-    re.compile(r"\b(paypal|venmo|cashapp|btc|crypto)\b", re.I),
-    re.compile(r"\b(sell(ing)?|buy(ing)?|trade|trading)\b", re.I),
+# Activity thresholds (points) — points come ONLY from real chatting via earn_for_message
+# With a 2,000/day cap, these take real time & consistency. Adjust anytime.
+ACTIVITY_THRESHOLDS = [
+    (ROLE_ROOKIE,     5_000),    # ~3 days of active chatting
+    (ROLE_SQUAD,     25_000),    # ~2 weeks
+    (ROLE_SPECIALIST, 75_000),   # ~1–1.5 months
+    (ROLE_OPERATIVE, 180_000),   # ~3 months
+    (ROLE_LEGEND,    400_000),   # ~6–7 months; very hard = “typed A LOT”
 ]
 
-# detector runtime controls
-_last_report_by_user: dict[int, float] = {}
-_report_cooldown_sec = 90  # don’t spam modlog
-def normalize_text(s: str) -> str:
-    t = s.lower()
-    t = re.sub(r"[_*`~>|]", " ", t)
-    t = re.sub(r"\s+", " ", t)
-    return f" {t.strip()} "
+# Roles allowed to see mod-only commands
+HELP_MOD_ROLE_IDS = {1413663966349234320, 1411940485005578322, 1413991410901713088}
 
 # ================== LOW-LEVEL PERSIST HELPERS ==================
 def load_json(path, default):
@@ -187,12 +164,7 @@ def save_json(path, data):
         json.dump(data, f)
 
 def load_config():
-    # rule_detector default ON
-    return load_json(CONFIG_FILE, {
-        "age_gate_enabled": True,
-        "min_account_age_sec": 7 * 24 * 3600,
-        "rule_detector_enabled": True
-    })
+    return load_json(CONFIG_FILE, {"age_gate_enabled": True, "min_account_age_sec": 7 * 24 * 3600})
 
 def save_config(cfg):
     save_json(CONFIG_FILE, cfg)
@@ -223,7 +195,6 @@ def load_giveaways():
     return data if isinstance(data, dict) else {}
 
 def save_giveaways(d):
-    save_giveaways_lock = d  # silence linter; nothing fancy
     save_json(GIVEAWAYS_FILE, d)
 
 CONFIG      = load_config()
@@ -257,18 +228,31 @@ async def db_init():
     _pool = await asyncpg.create_pool(dsn=DB_URL, min_size=1, max_size=5)
 
     async with _pool.acquire() as con:
-        # users table
+        # meta store
+        await con.execute("""
+        CREATE TABLE IF NOT EXISTS muta_meta (
+            key   TEXT PRIMARY KEY,
+            value TEXT
+        );
+        """)
+
+        # users
         await con.execute("""
         CREATE TABLE IF NOT EXISTS muta_users (
             user_id BIGINT PRIMARY KEY,
             cash BIGINT NOT NULL DEFAULT 0,
             last_earn_ts TIMESTAMPTZ,
             today_earned BIGINT NOT NULL DEFAULT 0,
-            bug_rewards_this_month INTEGER NOT NULL DEFAULT 0
+            bug_rewards_this_month INTEGER NOT NULL DEFAULT 0,
+            activity_points BIGINT NOT NULL DEFAULT 0   -- cumulative chat activity
         );
         """)
 
-        # drops table
+        # backfill/migrations (safe if already exists)
+        await con.execute("ALTER TABLE muta_users ADD COLUMN IF NOT EXISTS activity_points BIGINT NOT NULL DEFAULT 0;")
+        await con.execute("ALTER TABLE muta_users ADD COLUMN IF NOT EXISTS today_earned BIGINT NOT NULL DEFAULT 0;")
+
+        # drops
         await con.execute("""
         CREATE TABLE IF NOT EXISTS muta_drops (
             id BIGSERIAL PRIMARY KEY,
@@ -282,23 +266,6 @@ async def db_init():
         );
         """)
 
-        # meta kv
-        await con.execute("""
-        CREATE TABLE IF NOT EXISTS muta_meta (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        );
-        """)
-
-        # level → role mapping
-        await con.execute("""
-        CREATE TABLE IF NOT EXISTS muta_level_roles (
-            level INTEGER PRIMARY KEY,
-            role_id BIGINT NOT NULL
-        );
-        """)
-
-        # helpful index
         await con.execute("""
         CREATE INDEX IF NOT EXISTS idx_muta_drops_created_at ON muta_drops (created_at);
         """)
@@ -314,6 +281,18 @@ async def db_execute(query, *args):
 async def db_fetch(query, *args):
     async with _pool.acquire() as con:
         return await con.fetch(query, *args)
+
+# ------------------ META helpers ------------------
+async def db_get_meta(key: str) -> str | None:
+    row = await db_fetchrow("SELECT value FROM muta_meta WHERE key=$1", key)
+    return row["value"] if row and row["value"] is not None else None
+
+async def db_set_meta(key: str, value: str) -> None:
+    await db_execute(
+        "INSERT INTO muta_meta(key, value) VALUES($1, $2) "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+        key, value
+    )
 
 # ================== AIOHTTP (YouTube webhook) ==================
 app = web.Application()
@@ -403,7 +382,7 @@ class GiveawayView(View):
     def __init__(self, message_id: int):
         super().__init__(timeout=None)
         self.message_id = message_id
-        self._entered: set[int] = set()  # in-memory anti-double-click
+        self._entered: set[int] = set()
 
     @button(label="Enter", style=discord.ButtonStyle.primary, emoji="🎉", custom_id="gw_enter")
     async def enter_btn(self, interaction: discord.Interaction, btn: discord.ui.Button):
@@ -493,168 +472,61 @@ async def end_giveaway(message_id: int):
     GIVEAWAYS[mid] = gw
     save_giveaways(GIVEAWAYS)
 
-# ================== META HELPERS ==================
-async def db_get_meta(key: str) -> str | None:
-    row = await db_fetchrow("SELECT value FROM muta_meta WHERE key=$1", key)
-    return row["value"] if row and row["value"] is not None else None
-
-async def db_set_meta(key: str, value: str) -> None:
-    await db_execute("""
-        INSERT INTO muta_meta(key, value)
-        VALUES($1, $2)
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-    """, key, value)
-
-# ================== ECONOMY / LEVEL HELPERS ==================
+# ================== ECONOMY / USERS ==================
 async def ensure_user(uid: int):
-    await db_execute("""
-        INSERT INTO muta_users(user_id) VALUES($1)
-        ON CONFLICT (user_id) DO NOTHING
-    """, uid)
+    await db_execute(
+        "INSERT INTO muta_users(user_id) VALUES($1) ON CONFLICT (user_id) DO NOTHING",
+        uid
+    )
 
 async def add_cash(uid: int, amount: int) -> int:
+    # Admin/manual grants do NOT count toward activity points.
     await ensure_user(uid)
-    row = await db_fetchrow("""
-        UPDATE muta_users
-        SET cash = cash + $2
-        WHERE user_id = $1
-        RETURNING cash
-    """, uid, amount)
-    return int(row["cash"])
+    row = await db_fetchrow(
+        "UPDATE muta_users SET cash = cash + $1 WHERE user_id=$2 RETURNING cash",
+        amount, uid
+    )
+    return int(row["cash"]) if row else 0
 
 async def deduct_cash(uid: int, amount: int) -> int:
     await ensure_user(uid)
-    row = await db_fetchrow("""
-        UPDATE muta_users
-        SET cash = GREATEST(0, cash - $2)
-        WHERE user_id = $1
-        RETURNING cash
-    """, uid, amount)
-    return int(row["cash"])
-
-async def earn_for_message(uid: int, now: datetime, msg_len: int) -> int:
-    await ensure_user(uid)
-    # cooldown + daily cap
-    row = await db_fetchrow("SELECT last_earn_ts, today_earned, cash FROM muta_users WHERE user_id=$1", uid)
-    last = row["last_earn_ts"]
-    today_earned = int(row["today_earned"])
-
-    # reset daily counter at local midnight
-    local_midnight = datetime(now.year, now.month, now.day, tzinfo=TZ)
-    if not last or last.astimezone(TZ) < local_midnight:
-        today_earned = 0
-
-    if last:
-        delta = (now - last).total_seconds()
-        if delta < EARN_COOLDOWN_SEC:
-            return 0
-
-    gain = EARN_PER_TICK + tier_bonus(msg_len)
-    if DOUBLE_CASH:
-        gain *= 2
-
-    remaining = max(0, DAILY_CAP - today_earned)
-    actual = min(gain, remaining)
-    if actual <= 0:
-        # just refresh last_earn_ts so cooldown still applies
-        await db_execute("UPDATE muta_users SET last_earn_ts=$2 WHERE user_id=$1", uid, now)
-        return 0
-
-    await db_execute("""
-        UPDATE muta_users
-        SET cash = cash + $2,
-            today_earned = CASE
-                WHEN last_earn_ts IS NULL OR last_earn_ts < $3 THEN $2
-                ELSE today_earned + $2
-            END,
-            last_earn_ts = $3
-        WHERE user_id = $1
-    """, uid, actual, now)
-
-    # level-up roles
-    await maybe_assign_level_role(uid)
-    return actual
-
-async def leaderboard_top(n: int = 10):
-    rows = await db_fetch("""
-        SELECT user_id, cash FROM muta_users
-        ORDER BY cash DESC
-        LIMIT $1
-    """, n)
-    return rows
-
-async def monthly_reset():
-    # zero balances & daily
-    await db_execute("UPDATE muta_users SET cash=0, today_earned=0")
-    # reset bug reward counters
-    await db_execute("UPDATE muta_users SET bug_rewards_this_month=0")
+    row = await db_fetchrow(
+        "UPDATE muta_users SET cash = GREATEST(0, cash - $1) WHERE user_id=$2 RETURNING cash",
+        amount, uid
+    )
+    return int(row["cash"]) if row else 0
 
 async def can_bug_reward(uid: int) -> bool:
+    await ensure_user(uid)
+    # Reset monthly counters at month start
+    now = datetime.now(tz=TZ)
+    key = f"bug_month:{now.year}-{now.month}"
+    flag = await db_get_meta(key)
+    if flag != "ok":
+        await db_execute("UPDATE muta_users SET bug_rewards_this_month = 0")
+        await db_set_meta(key, "ok")
     row = await db_fetchrow("SELECT bug_rewards_this_month FROM muta_users WHERE user_id=$1", uid)
-    if not row:
-        await ensure_user(uid)
-        return True
-    return int(row["bug_rewards_this_month"]) < BUG_REWARD_LIMIT_PER_MONTH
+    return (row and int(row["bug_rewards_this_month"]) < BUG_REWARD_LIMIT_PER_MONTH)
 
 async def mark_bug_reward(uid: int):
     await ensure_user(uid)
-    await db_execute("""
-        UPDATE muta_users
-        SET bug_rewards_this_month = bug_rewards_this_month + 1
-        WHERE user_id=$1
-    """, uid)
+    await db_execute(
+        "UPDATE muta_users SET bug_rewards_this_month = bug_rewards_this_month + 1 WHERE user_id=$1",
+        uid
+    )
 
-# ===== Level roles (DB) =====
-async def set_level_role(level: int, role_id: int):
-    await db_execute("""
-        INSERT INTO muta_level_roles(level, role_id) VALUES($1,$2)
-        ON CONFLICT (level) DO UPDATE SET role_id = EXCLUDED.role_id
-    """, level, role_id)
+async def leaderboard_top(n: int = 10):
+    return await db_fetch("SELECT user_id, cash FROM muta_users ORDER BY cash DESC LIMIT $1", n)
 
-async def get_level_roles():
-    rows = await db_fetch("SELECT level, role_id FROM muta_level_roles ORDER BY level ASC")
-    return [(int(r["level"]), int(r["role_id"])) for r in rows]
+async def monthly_reset():
+    # Reset balances & daily earn; activity_points are NOT reset (keeps your progress)
+    await db_execute("UPDATE muta_users SET cash = 0, today_earned = 0")
 
-async def maybe_assign_level_role(uid: int):
-    # compute level from cash
-    row = await db_fetchrow("SELECT cash FROM muta_users WHERE user_id=$1", uid)
-    if not row:
-        return
-    cash = int(row["cash"])
-    level = cash // CASH_PER_LEVEL
-
-    mappings = await get_level_roles()
-    if not mappings:
-        return
-
-    guild = bot.get_guild(GUILD_ID)
-    if not guild:
-        return
-    member = guild.get_member(uid)
-    if not member:
-        return
-
-    # assign highest mapped role the user qualifies for
-    elig = [role_id for lvl, role_id in mappings if level >= lvl]
-    if not elig:
-        return
-    role_id = max(elig, key=lambda rid: rid)  # arbitrary tie-break; highest role id
-    role = guild.get_role(role_id)
-    if role and role not in member.roles:
-        try:
-            await member.add_roles(role, reason=f"Reached level {level}")
-        except Exception as e:
-            print(f"[levels] add role failed: {e}")
-
-# ================== MISC HELPERS ==================
-def last_day_of_month(dt: datetime) -> int:
-    nxt = (dt.replace(day=28) + timedelta(days=4))  # definitely next month
-    return (nxt - timedelta(days=nxt.day)).day
-
-TWEET_LINK_RE = re.compile(r"/" + re.escape(X_USERNAME) + r"/status/(\d+)")
-def nitter_latest_id_from_html(text: str) -> str | None:
-    m = TWEET_LINK_RE.search(text)
-    return m.group(1) if m else None
+def humanize_seconds(sec: int) -> str:
+    if sec % (24*3600) == 0: return f"{sec // (24*3600)}d"
+    if sec % 3600 == 0:      return f"{sec // 3600}h"
+    if sec % 60 == 0:        return f"{sec // 60}m"
+    return f"{sec}s"
 
 def parse_duration_to_seconds(s: str):
     s = s.strip().lower()
@@ -672,11 +544,90 @@ def parse_duration_to_seconds(s: str):
     n, unit = int(m.group(1)), m.group(2)
     return n*24*3600 if unit=="d" else n*3600 if unit=="h" else n*60
 
-def humanize_seconds(sec: int) -> str:
-    if sec % (24*3600) == 0: return f"{sec // (24*3600)}d"
-    if sec % 3600 == 0:      return f"{sec // 3600}h"
-    if sec % 60 == 0:        return f"{sec // 60}m"
-    return f"{sec}s"
+async def assign_activity_roles(member: discord.Member, points: int):
+    """Grant roles for which the member qualifies. Keeps all earned roles."""
+    if not member or not member.guild:
+        return
+    to_grant = []
+    for role_id, threshold in ACTIVITY_THRESHOLDS:
+        if role_id and points >= threshold:
+            role = member.guild.get_role(role_id)
+            if role and role not in member.roles:
+                to_grant.append(role)
+    if to_grant:
+        try:
+            await member.add_roles(*to_grant, reason=f"Reached activity thresholds (points={points})")
+        except Exception as e:
+            print(f"[levels] add_roles error: {e}")
+
+async def earn_for_message(uid: int, now: datetime, msg_len: int, guild: discord.Guild | None, author_id: int):
+    """Earning logic for normal messages. Also increments activity_points and handles auto-roles."""
+    await ensure_user(uid)
+
+    row = await db_fetchrow("SELECT cash, last_earn_ts, today_earned, activity_points FROM muta_users WHERE user_id=$1", uid)
+    last_ts = row["last_earn_ts"]
+    today_earned = int(row["today_earned"] or 0)
+    activity_points = int(row["activity_points"] or 0)
+
+    # reset daily (local) for the daily cap
+    if last_ts is not None:
+        last_local = last_ts.astimezone(TZ)
+        if (last_local.date() != now.date()):
+            today_earned = 0
+
+    if today_earned >= DAILY_CAP:
+        return 0
+
+    if last_ts is not None and (now - last_ts).total_seconds() < EARN_COOLDOWN_SEC:
+        return 0
+
+    base = EARN_PER_TICK + tier_bonus(msg_len)
+    if DOUBLE_CASH:
+        base *= 2
+
+    grant = min(base, max(0, DAILY_CAP - today_earned))
+
+    # Update: cash + today_earned + activity_points (only from chatting)
+    new_today = today_earned + grant
+    new_points = activity_points + grant  # tie activity to actual earnable message credit
+    await db_execute(
+        "UPDATE muta_users SET cash = cash + $1, last_earn_ts = $2, today_earned = $3, activity_points = $4 WHERE user_id=$5",
+        grant, now, new_today, new_points, uid
+    )
+
+    # Role check
+    if guild:
+        member = guild.get_member(author_id)
+        if member:
+            await assign_activity_roles(member, new_points)
+
+    return grant
+
+# ================== TEXT NORMALIZATION / CROSS-TRADE ==================
+def normalize_text(s: str) -> str:
+    s = s.lower()
+    s = re.sub(r"[_*~`>]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+BUY_SELL_WORDS = {
+    "cross-trade", "cross trade", "blackmarket", "bm", "robux", "paypal", "venmo",
+    "crypto", "btc", "eth", "real money", "sell robux", "buy robux", "cashapp"
+}
+CROSSTRADE_HINTS = {
+    "dm me to buy", "selling for cash", "buying with cash", "pay real money", "outside discord"
+}
+CROSSTRADE_PATTERNS = [
+    re.compile(r"sell(?:ing)?\s+\d+\s*robux", re.I),
+    re.compile(r"buy(?:ing)?\s+\d+\s*robux", re.I),
+    re.compile(r"\b(pp|paypal|btc|eth|cashapp|venmo)\b", re.I),
+]
+
+# ================== X helpers ==================
+TWEET_LINK_RE = re.compile(r"/" + re.escape(X_USERNAME) + r"/status/(\d+)")
+def nitter_latest_id_from_html(text: str) -> str | None:
+    m = TWEET_LINK_RE.search(text)
+    return m.group(1) if m else None
 
 def nitter_to_x(url: str) -> str:
     return url.replace("https://nitter.net", "https://x.com")
@@ -705,7 +656,9 @@ class PenaltyView(View):
         if not interaction.user.guild_permissions.manage_messages:
             return await interaction.response.send_message("Mods only.", ephemeral=True)
         new_bal = await deduct_cash(self.target_id, self.amount)
-        await interaction.response.edit_message(content=f"✅ Deducted {self.amount}. New balance for <@{self.target_id}>: {new_bal}", view=None)
+        await interaction.response.edit_message(
+            content=f"✅ Deducted {self.amount}. New balance for <@{self.target_id}>: {new_bal}", view=None
+        )
 
     @button(label="No", style=discord.ButtonStyle.secondary, emoji="❌", custom_id="pen_no")
     async def no_btn(self, interaction: discord.Interaction, _):
@@ -727,7 +680,10 @@ class BugApproveView(View):
             return await interaction.response.send_message("This user already reached this month’s bug reward limit.", ephemeral=True)
         await add_cash(self.reporter_id, BUG_REWARD_AMOUNT)
         await mark_bug_reward(self.reporter_id)
-        await interaction.response.edit_message(content=f"🛠️ Bug approved. <@{self.reporter_id}> received **{BUG_REWARD_AMOUNT}** cash.\n> {self.description}", view=None)
+        await interaction.response.edit_message(
+            content=f"🛠️ Bug approved. <@{self.reporter_id}> received **{BUG_REWARD_AMOUNT}** cash.\n> {self.description}",
+            view=None
+        )
 
     @button(label="Reject", style=discord.ButtonStyle.secondary, emoji="❌", custom_id="bug_no")
     async def reject(self, interaction: discord.Interaction, _):
@@ -735,85 +691,67 @@ class BugApproveView(View):
             return await interaction.response.send_message("Mods only.", ephemeral=True)
         await interaction.response.edit_message(content="Bug report rejected.", view=None)
 
-# ================== COMMANDS EMBED ==================
-def build_commands_embed(member: discord.Member) -> discord.Embed:
+# ================== HELP / COMMANDS EMBED ==================
+def build_commands_embed(author: discord.Member) -> discord.Embed:
+    show_mod = any((r.id in HELP_MOD_ROLE_IDS) for r in getattr(author, "roles", [])) or author.guild_permissions.administrator
+
     embed = discord.Embed(
         title="📜 Mutapapa Bot Commands",
-        description="Here’s a list of all commands available on this bot.",
+        description="Here’s a list of commands available on this bot.",
         color=0x5865F2
     )
 
-    # Everyone’s commands
     everyone = [
         ("!ping", "Check if the bot is alive. Responds with 'pong 🏓'."),
         ("!balance | !bal | !cashme | !mycash", "See how much Mutapapa Cash you have."),
         ("!leaderboard", "Shows the Top 10 richest users on the server."),
         (f"!cash <{DROP_WORD_COUNT} words>", "Claim a **cash drop** when it appears. Example: `!cash alpha bravo charlie delta`."),
-        ("!bugreport <description>", "Report a Jailbreak bug. If approved by mods, you earn **350 cash** (max 2 per month)."),
+        ("!bugreport <description>", f"Report a Jailbreak bug. If approved by mods, you earn **{BUG_REWARD_AMOUNT} cash** (max {BUG_REWARD_LIMIT_PER_MONTH}/month)."),
         ("!countstatus", "Check the counting game progress: the next number & the goal."),
-        ("!mylevel | !level", "Show your current level, cash, and how much until the next level."),
     ]
-
-    # Admin / Mod commands (only shown to allowed roles or admins)
-    admin = [
-        ("!send <message>", "Make the bot send a message as itself."),
-        ("!sendreact <message>", "Post a reaction-role message in the configured channel."),
-        ("!gstart <duration> | <winners> | <title> | <desc>", "Start a giveaway. Examples: `!gstart 1h | 1 | 100 Robux | Join now!` or `!gstart 0h 1m | 1 | Flash Drop | Hurry!`."),
-        ("!gend", "End the most recent active giveaway."),
-        ("!greroll", "Reroll the most recent giveaway."),
-        ("!countgoal <number>", "Set a new counting goal."),
-        ("!countnext <number>", "Force the next expected number."),
-        ("!countreset", "Reset counting back to 1."),
-        ("!doublecash on|off", "Turn double-cash earnings on or off."),
-        ("!addcash @user <amount> [reason] | !add @user <amount> [reason]", "Give cash to a user."),
-        ("!removecash @user <amount> [reason] | !remove @user <amount> [reason]", "Remove cash from a user."),
-        ("!rules on | !rules off", "Enable or disable the rule detector."),
-        ("!setlevelrole <level> <@role|role_id>", "Map a level threshold to a role for auto-promotions."),
-        ("!listlevelroles", "List current level→role mappings."),
-    ]
-
-    # Always show "Everyone"
     ev_lines = [f"**{name}**\n{desc}" for name, desc in everyone]
     embed.add_field(name="👥 Everyone", value="\n\n".join(ev_lines), inline=False)
 
-    # Show admin section only to admins or members with an allowed role
-    can_view_admin = (
-        (member.guild_permissions.administrator) or
-        any((r.id in COMMANDS_ADMIN_ROLE_IDS) for r in getattr(member, "roles", []))
-    )
-
-    if can_view_admin:
+    if show_mod:
+        admin = [
+            ("!send <message>", "Make the bot send a message as itself."),
+            ("!sendreact <message>", "Post a message in the reaction-role channel and auto-add 📺 🔔 ✖️ 🎉."),
+            ("!gstart <duration> | <winners> | <title> | <desc>",
+             "Start a giveaway. Examples:\n"
+             "`!gstart 1h | 1 | 100 Robux | Join now!`\n"
+             "`!gstart 0h 1m | 1 | Flash Drop | Hurry!`"),
+            ("!gend", "Ends the most recent active giveaway immediately."),
+            ("!greroll", "Rerolls the most recent giveaway (picks new winners)."),
+            ("!countgoal <number>", "Set the counting goal."),
+            ("!countnext <number>", "Force the next expected number."),
+            ("!countreset", "Reset counting back to 1."),
+            ("!doublecash on|off", "Turn double-cash earnings on or off."),
+            ("!addcash @user <amount> [reason] | !add ...", "Give cash to a user."),
+            ("!removecash @user <amount> [reason] | !remove ...", "Remove cash from a user."),
+        ]
         ad_lines = [f"**{name}**\n{desc}" for name, desc in admin]
         embed.add_field(name="🛠️ Admin / Mods", value="\n\n".join(ad_lines), inline=False)
 
-    embed.set_footer(text="Durations support d/h/m, e.g. '1d', '2h 30m', or '0h 1m'.")
+    embed.set_footer(text="Durations support d/h/m, e.g. '1d', '2h 30m', or '0h 1m'. Activity roles are earned by consistent chatting.")
     return embed
 
 # ================== DISCORD EVENTS ==================
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-    # DB + web server
+    print(f"Logged in as {bot.user} ({bot.user.id})")
+    # init DB + webserver
     await db_init()
-    try:
-        await start_webserver()
-    except Exception as e:
-        print(f"[web] start failed: {e}")
-    # loops
-    try:
-        x_posts_loop.start()
-    except Exception:
-        pass
-    try:
-        drops_loop.start()
-    except Exception:
-        pass
-    try:
-        monthly_reset_loop.start()
-    except Exception:
-        pass
-    print("All systems go.")
+    await start_webserver()
 
+    # start loops
+    if not x_posts_loop.is_running():
+        x_posts_loop.start()
+    if not drops_loop.is_running():
+        drops_loop.start()
+    if not monthly_reset_loop.is_running():
+        monthly_reset_loop.start()
+
+# ================== MESSAGE HANDLING ==================
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
@@ -822,57 +760,24 @@ async def on_message(message: discord.Message):
     content = (message.content or "").strip()
     clower  = content.lower()
 
-    # help
-if clower in ("!commands", "!help"):
-    await message.channel.send(embed=build_commands_embed(message.author))
-    await delete_command_msg()
-    return
-
     async def delete_command_msg():
         try:
             await message.delete()
         except Exception:
             pass
 
-    # ------------------ COMMANDS (run first) ------------------
+    # ---------- HELP ----------
+    if clower in ("!commands", "!help"):
+        await message.channel.send(embed=build_commands_embed(message.author))
+        await delete_command_msg()
+        return
 
-    # ping
+    # ---------- COMMANDS ----------
     if clower == "!ping":
         await message.channel.send("pong 🏓")
         await delete_command_msg()
         return
 
-    # my level
-    if clower in ("!mylevel", "!level"):
-        await ensure_user(message.author.id)
-        row = await db_fetchrow("SELECT cash FROM muta_users WHERE user_id=$1", message.author.id)
-        cash = int(row["cash"]) if row else 0
-        level = cash // CASH_PER_LEVEL
-        need = ((level + 1) * CASH_PER_LEVEL) - cash
-        await message.channel.send(f"🔼 {message.author.mention} level: **{level}** | cash: **{cash}** | next level in **{need}** cash")
-        await delete_command_msg()
-        return
-
-    # rule detector toggle (admins or allowed roles)
-    if clower.startswith("!rules "):
-        can_toggle = (
-            message.author.guild_permissions.administrator
-            or any((r.id in COMMANDS_ADMIN_ROLE_IDS) for r in getattr(message.author, "roles", []))
-        )
-        if not can_toggle:
-            await message.channel.send("❗ Mods/Admins only.")
-            return
-        arg = clower.split(maxsplit=1)[1].strip()
-        if arg not in ("on","off"):
-            await message.channel.send("Usage: `!rules on` or `!rules off`")
-            return
-        CONFIG["rule_detector_enabled"] = (arg == "on")
-        save_config(CONFIG)
-        await message.channel.send(f"🛰️ Rule detector **{arg.upper()}**.")
-        await delete_command_msg()
-        return
-
-    # send as bot (admin)
     if clower.startswith("!send "):
         if not message.author.guild_permissions.administrator:
             await message.channel.send("❗ Admins only."); return
@@ -883,7 +788,6 @@ if clower in ("!commands", "!help"):
         await delete_command_msg()
         return
 
-    # reaction-role: create tracked message (admin)
     if clower.startswith("!sendreact "):
         if not message.author.guild_permissions.administrator:
             await message.channel.send("❗ Admins only."); return
@@ -910,7 +814,7 @@ if clower in ("!commands", "!help"):
         try:
             _, rest = content.split(" ", 1)
             parts = [p.strip() for p in rest.split("|")]
-            dur_s = parse_duration_to_seconds(parts[0])        # supports "0h 1m"
+            dur_s = parse_duration_to_seconds(parts[0])
             winners_count = int(parts[1])
             title = parts[2] if len(parts) > 2 else "Giveaway"
             desc  = parts[3] if len(parts) > 3 else ""
@@ -918,16 +822,15 @@ if clower in ("!commands", "!help"):
             await message.channel.send(
                 "Usage: `!gstart <duration> | <winners> | <title> | <description>`\n"
                 "Examples: `!gstart 1h | 1 | 100 Robux | Press Enter to join!`  or  `!gstart 0h 1m | 1 | Flash Drop | Hurry!`"
-            )
-            return
+            ); return
         if not dur_s or dur_s <= 0 or winners_count < 1:
             await message.channel.send("❗ Bad duration or winners."); return
         ends_at = time() + dur_s
-        embed = discord.Embed(title=title, description=desc, color=0x5865F2)
-        embed.add_field(name="Duration", value=parts[0])
-        embed.add_field(name="Winners", value=str(winners_count))
-        embed.set_footer(text="Press Enter to join • View Participants to see who’s in")
-        sent = await message.channel.send(embed=embed, view=GiveawayView(0))
+        emb = discord.Embed(title=title, description=desc, color=0x5865F2)
+        emb.add_field(name="Duration", value=parts[0])
+        emb.add_field(name="Winners", value=str(winners_count))
+        emb.set_footer(text="Press Enter to join • View Participants to see who’s in")
+        sent = await message.channel.send(embed=emb, view=GiveawayView(0))
         mid = str(sent.id)
         GIVEAWAYS[mid] = {
             "channel_id": message.channel.id,
@@ -939,10 +842,8 @@ if clower in ("!commands", "!help"):
             "ended": False
         }
         save_giveaways(GIVEAWAYS)
-        try:
-            await sent.edit(view=GiveawayView(sent.id))
-        except Exception:
-            pass
+        try: await sent.edit(view=GiveawayView(sent.id))
+        except Exception: pass
         asyncio.create_task(schedule_giveaway_end(sent.id, ends_at))
         await delete_command_msg()
         return
@@ -981,8 +882,7 @@ if clower in ("!commands", "!help"):
         if not message.author.guild_permissions.administrator:
             await message.channel.send("❗ Admins only."); return
         try:
-            new_goal = int(content.split(maxsplit=1)[1])
-            if new_goal < 1: raise ValueError
+            new_goal = int(content.split(maxsplit=1)[1]); assert new_goal > 0
         except Exception:
             await message.channel.send("Usage: `!countgoal <positive integer>`"); return
         COUNT_STATE["goal"] = new_goal
@@ -995,8 +895,7 @@ if clower in ("!commands", "!help"):
         if not message.author.guild_permissions.administrator:
             await message.channel.send("❗ Admins only."); return
         try:
-            new_next = int(content.split(maxsplit=1)[1])
-            if new_next < 1: raise ValueError
+            new_next = int(content.split(maxsplit=1)[1]); assert new_next > 0
         except Exception:
             await message.channel.send("Usage: `!countnext <positive integer>`"); return
         COUNT_STATE["expected_next"] = new_next
@@ -1019,7 +918,7 @@ if clower in ("!commands", "!help"):
         await message.channel.send(f"🔢 Next: **{st.get('expected_next', 1)}** | Goal: **{st.get('goal', 67)}**")
         return
 
-    # economy admin: add/remove cash
+    # economy admin
     if clower.startswith("!addcash") or clower.startswith("!add "):
         if not message.author.guild_permissions.administrator:
             await message.channel.send("❗ Admins only."); return
@@ -1070,34 +969,18 @@ if clower in ("!commands", "!help"):
         rows = await leaderboard_top(10)
         if not rows:
             await message.channel.send("No data yet."); return
-        lines = []
-        for i, r in enumerate(rows, start=1):
-            lines.append(f"**{i}.** <@{r['user_id']}> — {r['cash']}")
-        embed = discord.Embed(title="🏆 Top 10", description="\n".join(lines), color=0xF1C40F)
-        await message.channel.send(embed=embed)
+        lines = [f"**{i}.** <@{r['user_id']}> — {r['cash']}" for i, r in enumerate(rows, start=1)]
+        emb = discord.Embed(title="🏆 Top 10", description="\n".join(lines), color=0xF1C40F)
+        await message.channel.send(embed=emb)
         await delete_command_msg()
         return
 
-    # double cash toggle (admin)
-    if clower.startswith("!doublecash"):
-        if not message.author.guild_permissions.administrator:
-            await message.channel.send("❗ Admins only."); return
-        global DOUBLE_CASH
-        arg = clower.split(maxsplit=1)[1].strip() if " " in clower else ""
-        if arg in ("on","off"):
-            DOUBLE_CASH = (arg == "on")
-            await message.channel.send(f"💥 Double-cash **{arg.upper()}**.")
-            await delete_command_msg()
-            return
-        await message.channel.send("Usage: `!doublecash on` or `!doublecash off`")
-        return
-
-    # bug report: !bugreport <short description>
+    # bug report
     if clower.startswith("!bugreport "):
         desc = content.split(" ", 1)[1].strip()
         if len(desc) < 5:
             await message.channel.send("Please include a short description."); return
-        channel = message.guild.get_channel(BUG_REVIEW_CHANNEL_ID)
+        channel = message.guild.get_channel(BUGS_REVIEW_CHANNEL_ID)
         if not channel:
             await message.channel.send("Bug review channel not found."); return
         view = BugApproveView(message.author.id, desc)
@@ -1106,35 +989,7 @@ if clower in ("!commands", "!help"):
         await delete_command_msg()
         return
 
-    # claim random cash drop: !cash <four words>
-    if clower.startswith("!cash"):
-        parts = content.split()
-        if len(parts) >= (1 + DROP_WORD_COUNT):
-            phrase = " ".join(p.lower() for p in parts[1:1+DROP_WORD_COUNT])
-            row = await db_fetchrow("""
-                SELECT id, amount FROM muta_drops
-                WHERE phrase=$1 AND claimed_by IS NULL
-                ORDER BY created_at DESC
-                LIMIT 1
-            """, phrase)
-            if not row:
-                await message.channel.send("That drop was already claimed or not found."); return
-            drop_id = row["id"]; amount = row["amount"]
-            await db_execute("""
-                UPDATE muta_drops
-                SET claimed_by=$1, claimed_at=NOW()
-                WHERE id=$2 AND claimed_by IS NULL
-            """, message.author.id, drop_id)
-            new_bal = await add_cash(message.author.id, amount)
-            await message.channel.send(f"💸 {message.author.mention} claimed **{amount}** cash! (bal: {new_bal})")
-            await delete_command_msg()
-            return
-        else:
-            await message.channel.send(f"Usage: `!cash <{DROP_WORD_COUNT} words from the embed>`")
-            return
-
-    # ------------------ NON-COMMANDS ------------------
-
+    # ---------- NON-COMMANDS ----------
     # Counting channel enforcement
     if message.channel.id == COUNT_CHANNEL_ID and not message.author.bot:
         if content.startswith("!"):
@@ -1149,7 +1004,7 @@ if clower in ("!commands", "!help"):
         save_count_state(COUNT_STATE)
         return
 
-    # W/F/L auto-reaction
+    # W/F/L reactions
     if message.channel.id == WFL_CHANNEL_ID:
         t = clower
         has_wfl = (
@@ -1167,18 +1022,16 @@ if clower in ("!commands", "!help"):
             except Exception as e:
                 print(f"[wfl] failed to add reactions: {e}")
 
-    # Earn cash for messages
+    # Earn cash + activity for messages
     if message.channel.id in EARN_CHANNEL_IDS and not content.startswith("!"):
         now = datetime.now(tz=TZ)
         try:
-            gained = await earn_for_message(message.author.id, now, len(content))
-            if gained > 0:
-                await maybe_assign_level_role(message.author.id)
+            await earn_for_message(message.author.id, now, len(content), message.guild, message.author.id)
         except Exception as e:
             print(f"[earn] error: {e}")
 
-    # Rule / cross-trade detector
-    if CONFIG.get("rule_detector_enabled", True) and (message.channel.id != MOD_LOG_CHANNEL_ID):
+    # Cross-trade detector
+    if message.channel.id != MOD_LOG_CHANNEL_ID:
         if (not MONITORED_CHANNEL_IDS) or (message.channel.id in MONITORED_CHANNEL_IDS):
             raw = content
             if raw.strip():
@@ -1192,13 +1045,15 @@ if clower in ("!commands", "!help"):
                     if rx.search(raw) or rx.search(norm): hits.add(rx.pattern)
                 if hits:
                     nowt = time()
-                    last = _last_report_by_user.get(message.author.id, 0)
-                    if nowt - last >= _report_cooldown_sec:
-                        _last_report_by_user[message.author.id] = nowt
+                    user_key = f"report_cool:{message.author.id}"
+                    last_s = await db_get_meta(user_key)
+                    last = float(last_s) if last_s else 0.0
+                    if nowt - last >= 120:  # 2 min throttle/user
+                        await db_set_meta(user_key, str(nowt))
                         modlog = message.guild.get_channel(MOD_LOG_CHANNEL_ID)
                         if modlog:
                             embed = discord.Embed(
-                                title="⚠️ Possible Cross-Trading / Rule Violation",
+                                title="⚠️ Possible Cross-Trading / Black-Market Activity",
                                 description=(f"**User:** {message.author.mention} (`{message.author}`)\n"
                                              f"**Channel:** {message.channel.mention}\n"
                                              f"**Message:**\n{message.content[:1000]}"),
@@ -1266,7 +1121,7 @@ async def on_member_join(member: discord.Member):
         embed.set_image(url=BANNER_URL)
         await ch.send(embed=embed)
 
-# ================== REACTION ROLES (handlers) ==================
+# ================== REACTION ROLES ==================
 @bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     if payload.guild_id != GUILD_ID:
@@ -1280,12 +1135,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     role_id = REACTION_ROLE_MAP.get(emoji)
     if not role_id:
         return
-    guild = bot.get_guild(payload.guild_id)
-    if not guild: return
-    role = guild.get_role(role_id)
-    if not role: return
-    member = guild.get_member(payload.user_id)
-    if not member: return
+    guild = bot.get_guild(payload.guild_id);  role = guild.get_role(role_id) if guild else None
+    member = guild.get_member(payload.user_id) if guild else None
+    if not (guild and role and member): return
     try:
         if role not in member.roles:
             await member.add_roles(role, reason="Reaction role add")
@@ -1303,19 +1155,115 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     role_id = REACTION_ROLE_MAP.get(emoji)
     if not role_id:
         return
-    guild = bot.get_guild(payload.guild_id)
-    if not guild: return
-    role = guild.get_role(role_id)
-    if not role: return
-    member = guild.get_member(payload.user_id)
-    if not member: return
+    guild = bot.get_guild(payload.guild_id);  role = guild.get_role(role_id) if guild else None
+    member = guild.get_member(payload.user_id) if guild else None
+    if not (guild and role and member): return
     try:
         if role in member.roles:
             await member.remove_roles(role, reason="Reaction role remove")
     except Exception as e:
         print(f"[rr] remove error: {e}")
 
-# ================== BACKGROUND LOOPS ==================
+# ================== RANDOM DROP SCHEDULER ==================
+def _today_key(now: datetime) -> str:
+    return now.strftime("%Y%m%d")
+
+async def _get_or_build_today_drop_schedule(now: datetime) -> dict:
+    """
+    Persisted JSON format:
+      {"times":[unix,...], "created":[false,...]}
+    """
+    day_key = _today_key(now)
+    meta_key = f"drops_schedule:{day_key}"
+    raw = await db_get_meta(meta_key)
+    if raw:
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict) and "times" in data and "created" in data:
+                return data
+        except Exception:
+            pass
+
+    # Fresh schedule: choose 3 or 4 slots uniformly over [start, end)
+    start = datetime(now.year, now.month, now.day, tzinfo=TZ)
+    end   = start + timedelta(days=1)
+    count = random.choice([3, 4])
+    seconds = sorted(random.sample(range(int((end - start).total_seconds())), count))
+    times = [int(start.timestamp()) + s for s in seconds]
+    schedule = {"times": times, "created": [False]*count}
+    await db_set_meta(meta_key, json.dumps(schedule))
+    return schedule
+
+async def _mark_drop_created(now: datetime, schedule: dict, idx: int):
+    schedule["created"][idx] = True
+    meta_key = f"drops_schedule:{_today_key(now)}"
+    await db_set_meta(meta_key, json.dumps(schedule))
+
+@tasks.loop(seconds=45)
+async def drops_loop():
+    """
+    Create drops only at the pre-scheduled random times of the current local day.
+    Survives restarts because schedule is persisted in muta_meta.
+    """
+    guild = bot.get_guild(GUILD_ID)
+    if not guild:
+        return
+    ch = guild.get_channel(CASH_DROP_CHANNEL_ID)
+    if not ch:
+        return
+
+    # Ensure table exists (defensive)
+    try:
+        await db_execute("""
+        CREATE TABLE IF NOT EXISTS muta_drops (
+            id BIGSERIAL PRIMARY KEY,
+            channel_id BIGINT NOT NULL,
+            message_id BIGINT NOT NULL UNIQUE,
+            phrase TEXT NOT NULL,
+            amount INTEGER NOT NULL,
+            claimed_by BIGINT,
+            claimed_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """)
+    except Exception:
+        return
+
+    now = datetime.now(tz=TZ)
+    schedule = await _get_or_build_today_drop_schedule(now)
+
+    if not schedule["times"]:
+        schedule = await _get_or_build_today_drop_schedule(now)
+
+    # Fire any due, uncreated drops (one per tick)
+    for i, ts in enumerate(schedule["times"]):
+        if schedule["created"][i]:
+            continue
+        if time() >= ts:
+            phrase = four_words()
+            embed = discord.Embed(
+                title="[Cash] Cash drop!",
+                description=f"Type `!cash {phrase}` to collect **{DROP_AMOUNT}** cash!",
+                color=0x2ECC71
+            )
+            try:
+                msg = await ch.send(embed=embed)
+            except Exception:
+                return
+
+            try:
+                await db_execute("""
+                    INSERT INTO muta_drops(channel_id, message_id, phrase, amount, created_at)
+                    VALUES($1,$2,$3,$4, NOW())
+                """, CASH_DROP_CHANNEL_ID, msg.id, phrase.lower(), DROP_AMOUNT)
+                await _mark_drop_created(now, schedule, i)
+            except Exception:
+                try: await msg.delete()
+                except Exception: pass
+            finally:
+                break  # one per loop
+
+# ================== X POSTS LOOP ==================
 @tasks.loop(minutes=2)
 async def x_posts_loop():
     guild = bot.get_guild(GUILD_ID)
@@ -1328,7 +1276,6 @@ async def x_posts_loop():
     cache = load_x_cache()
     last_guid = cache.get("last_guid")
 
-    # 1) Try RSS first
     feeds = [X_RSS_URL] + [u for u in X_RSS_FALLBACKS if u != X_RSS_URL]
     announced = False
     try:
@@ -1372,7 +1319,7 @@ async def x_posts_loop():
     if announced:
         return
 
-    # 2) Fallback: parse the Nitter HTML via a read-only text mirror.
+    # Fallback: parse Nitter HTML via text mirror
     try:
         mirror_url = f"https://r.jina.ai/http://nitter.net/{X_USERNAME}"
         async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
@@ -1404,71 +1351,7 @@ async def x_posts_loop():
     except Exception:
         pass
 
-@tasks.loop(minutes=5)
-async def drops_loop():
-    """Ensure up to 4 drops per local day in CASH_DROP_CHANNEL_ID."""
-    guild = bot.get_guild(GUILD_ID)
-    if not guild:
-        return
-    ch = guild.get_channel(CASH_DROP_CHANNEL_ID)
-    if not ch:
-        return
-
-    # Guard: ensure table exists
-    try:
-        await db_execute("""
-        CREATE TABLE IF NOT EXISTS muta_drops (
-            id BIGSERIAL PRIMARY KEY,
-            channel_id BIGINT NOT NULL,
-            message_id BIGINT NOT NULL UNIQUE,
-            phrase TEXT NOT NULL,
-            amount INTEGER NOT NULL,
-            claimed_by BIGINT,
-            claimed_at TIMESTAMPTZ,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        """)
-    except Exception:
-        return  # if DB isn’t ready yet, just try again next tick
-
-    now = datetime.now(tz=TZ)
-    start = datetime(now.year, now.month, now.day, tzinfo=TZ)
-
-    try:
-        rows = await db_fetch("""
-            SELECT COUNT(*) AS c FROM muta_drops
-            WHERE channel_id=$1 AND created_at >= $2
-        """, CASH_DROP_CHANNEL_ID, start)
-    except Exception:
-        return
-
-    today_count = rows[0]["c"] if rows else 0
-    if today_count >= DROPS_PER_DAY:
-        return
-
-    phrase = four_words()
-    embed = discord.Embed(
-        title="[Cash] Cash drop!",
-        description=f"Type `!cash {phrase}` to collect **{DROP_AMOUNT}** cash!",
-        color=0x2ECC71
-    )
-    try:
-        msg = await ch.send(embed=embed)
-    except Exception:
-        return
-
-    try:
-        await db_execute("""
-            INSERT INTO muta_drops(channel_id, message_id, phrase, amount, created_at)
-            VALUES($1,$2,$3,$4, NOW())
-        """, CASH_DROP_CHANNEL_ID, msg.id, phrase.lower(), DROP_AMOUNT)
-    except Exception:
-        try:
-            await msg.delete()
-        except Exception:
-            pass
-        return
-
+# ================== MONTHLY RESET ==================
 @tasks.loop(minutes=1)
 async def monthly_reset_loop():
     """Reset ONLY at the end of the month: last day 23:59 America/Edmonton."""
@@ -1478,6 +1361,7 @@ async def monthly_reset_loop():
         print("[season] monthly reset running…")
         rows = await leaderboard_top(10)
         await monthly_reset()
+
         try:
             guild = bot.get_guild(GUILD_ID)
             if guild:
