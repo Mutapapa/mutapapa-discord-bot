@@ -200,6 +200,9 @@ if scheme not in ("postgresql", "postgres"):
 _pool: asyncpg.Pool | None = None
 
 async def db_init():
+
+
+
     """Create pool and ensure tables exist."""
     global _pool
     _pool = await asyncpg.create_pool(dsn=DB_URL, min_size=1, max_size=5)
