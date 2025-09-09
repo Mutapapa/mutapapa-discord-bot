@@ -1,4 +1,4 @@
-# bot.py
+	# bot.py
 import os
 import asyncio
 import json
@@ -200,7 +200,7 @@ if scheme not in ("postgresql", "postgres"):
 _pool: asyncpg.Pool | None = None
 
 async def db_init():
-    """Create pool and run idempotent migrations so loops don’t race."""
+    """Create pool and ensure tables exist."""
     global _pool
     _pool = await asyncpg.create_pool(dsn=DB_URL, min_size=1, max_size=5)
 
@@ -241,33 +241,6 @@ async def db_execute(query, *args):
 async def db_fetch(query, *args):
     async with _pool.acquire() as con:
         return await con.fetch(query, *args)
-
-# ================== TEXT NORMALIZATION / DETECTOR ==================
-LEET_MAP = str.maketrans({"$":"s","@":"a","0":"o","1":"i","3":"e","5":"s","7":"t"})
-def normalize_text(s: str) -> str:
-    s = s.lower().translate(LEET_MAP)
-    s = re.sub(r"[\W_]+", " ", s)
-    return " ".join(s.split())
-
-BUY_SELL_WORDS = {
-    "buy","buying","wtb","purchase","sell","selling","wts","forsale","for sale",
-    "trade","trading","lf","looking","looking for"
-}
-CROSSTRADE_HINTS = {
-    "cross trade","cross trading","x trade","x trading","jb for","jailbreak for",
-    "trading jailbreak for","gag","grow a garden","stb","sab","steal a brainrot","brainrot",
-    "adopt me","blox fruits","pls donate","psx","pet sim","paypal","cashapp","venmo",
-    "etransfer","e transfer","gift card","robux for money","r$ for","nitro for cash",
-    "real money","irl money","dm me for cash","pay with","sell for $","buy for $"
-}
-CROSSTRADE_PATTERNS = [
-    re.compile(r"\b(jb|jailbreak)\s*(for|4)\s+\w+", re.I),
-    re.compile(r"\btrading\s+(jb|jailbreak)\s*(for|4)\s+\w+", re.I),
-    re.compile(r"\bbuy(ing)?\b.*\bfor\b.*\b(cash|paypal|gift\s*card|venmo|etransfer|e\s*transfer)\b", re.I),
-    re.compile(r"\bsell(ing)?\b.*\bfor\b.*\b(cash|paypal|gift\s*card|venmo|etransfer|e\s*transfer)\b", re.I),
-]
-_report_cooldown_sec = 30
-_last_report_by_user = {}
 
 # ================== AIOHTTP (YouTube webhook) ==================
 app = web.Application()
@@ -561,6 +534,9 @@ class BugApproveView(View):
 async def on_ready():
 
 async def db_init():
+
+
+
     global _pool
     _pool = await asyncpg.create_pool(dsn=DB_URL, min_size=1, max_size=5)
 
