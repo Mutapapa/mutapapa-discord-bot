@@ -577,8 +577,58 @@ async def db_init():
         """)
 
 # ================== MESSAGE HANDLING ==================
+def build_commands_embed() -> discord.Embed:
+    embed = discord.Embed(
+        title="📜 Mutapapa Bot Commands",
+        description="Here’s a list of all commands available on this bot.",
+        color=0x5865F2
+    )
+
+    # Everyone’s commands
+    everyone = [
+        ("!ping", "Check if the bot is alive. Responds with 'pong 🏓'."),
+        ("!balance | !bal | !cashme | !mycash", "See how much Mutapapa Cash you have."),
+        ("!leaderboard", "Shows the Top 10 richest users on the server."),
+        (f"!cash <{DROP_WORD_COUNT} words>", "Claim a **cash drop** when it appears. Example: `!cash alpha bravo charlie delta`."),
+        ("!bugreport <description>", "Report a Jailbreak bug. If approved by mods, you earn **350 cash** (max 2 per month)."),
+        ("!countstatus", "Check the counting game progress: the next number & the goal."),
+    ]
+
+    # Admin / Mod commands
+    admin = [
+        ("!send <message>", "Make the bot send a message as itself. Example: `!send Hello everyone!`."),
+        ("!sendreact <message>", "Post a special message in the reaction-role channel. The bot will add 📺 🔔 ✖️ 🎉 reactions automatically."),
+        ("!gstart <duration> | <winners> | <title> | <desc>",
+         "Start a giveaway.\nExamples:\n`!gstart 1h | 1 | 100 Robux | Join now!`\n`!gstart 0h 1m | 1 | Flash Drop | Hurry!`"),
+        ("!gend", "Ends the most recent active giveaway immediately."),
+        ("!greroll", "Rerolls the most recent giveaway (picks new winners)."),
+        ("!countgoal <number>", "Set a new counting goal. Example: `!countgoal 1000`."),
+        ("!countnext <number>", "Force the next expected number. Example: `!countnext 25`."),
+        ("!countreset", "Reset counting back to 1."),
+        ("!doublecash on|off", "Turn double-cash earnings on or off."),
+        ("!addcash @user <amount> [reason] | !add @user <amount> [reason]",
+         "Give cash to a user. Example: `!addcash @Mutapapa 500 Giveaway prize`."),
+        ("!removecash @user <amount> [reason] | !remove @user <amount> [reason]",
+         "Remove cash from a user. Example: `!removecash @Mutapapa 1500 Penalty`."),
+    ]
+
+    # Build embed fields
+    ev_lines = [f"**{name}**\n{desc}" for name, desc in everyone]
+    ad_lines = [f"**{name}**\n{desc}" for name, desc in admin]
+
+    embed.add_field(name="👥 Everyone", value="\n\n".join(ev_lines), inline=False)
+    embed.add_field(name="🛠️ Admin / Mods", value="\n\n".join(ad_lines), inline=False)
+
+    embed.set_footer(text="Durations support d/h/m, e.g. '1d', '2h 30m', or '0h 1m'.")
+
+    return embed
+
 @bot.event
 async def on_message(message: discord.Message):
+    if clower in ("!commands", "!help"):
+        await message.channel.send(embed=build_commands_embed())
+        return
+
     if message.author.bot or not message.guild:
         return
 
