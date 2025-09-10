@@ -152,6 +152,20 @@ ACTIVITY_THRESHOLDS = [
 HELP_MOD_ROLE_IDS = {1413663966349234320, 1411940485005578322, 1413991410901713088}
 
 # ================== LOW-LEVEL PERSIST HELPERS ==================
+YT_CACHE_FILE = "yt_last_video.json"
+
+def load_yt_cache():
+    return load_json(YT_CACHE_FILE, {})
+
+def save_yt_cache(d):
+    save_json(YT_CACHE_FILE, d)
+
+# Normalize tweet ID from any link like https://nitter.../status/123 or https://x.com/.../status/123
+_TWEET_ID_RE = re.compile(r"/status/(\d+)")
+def _extract_tweet_id(link: str) -> str | None:
+    m = _TWEET_ID_RE.search(link or "")
+    return m.group(1) if m else None
+
 def load_json(path, default):
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -334,11 +348,11 @@ async def yt_webhook_handler(request: web.Request):
             role = guild.get_role(YT_PING_ROLE_ID)
             if ch and role:
                 embed = discord.Embed(
-                    title=title or "New upload!",
-                    url=f"https://youtu.be/{vid}",
-                    description="A new video just dropped 🔔",
-                    color=0xE62117
-                )
+    title=title or "New upload!",
+    url=f"https://youtu.be/{vid}",  # works for Shorts too
+    description="Mutapapa just uploaded on YouTube — click to watch! 🔔",
+    color=0xE62117
+)
                 embed.set_image(url=f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg")
                 allowed = discord.AllowedMentions(roles=True, users=False, everyone=False)
                 await ch.send(content=role.mention, embed=embed, allowed_mentions=allowed)
@@ -736,6 +750,50 @@ def build_commands_embed(author: discord.Member) -> discord.Embed:
     return embed
 
 # ================== DISCORD EVENTS ==================
+@tasks.loop(minutes=3)
+async def yt_poll_loop():
+    """Fallback in case WebSub subscription isn’t flowing; polls the channel feed and posts new uploads/Shorts."""
+    guild = bot.get_guild(GUILD_ID)
+    if not guild:
+        return
+    ch = guild.get_channel(YT_ANNOUNCE_CHANNEL_ID)
+    role = guild.get_role(YT_PING_ROLE_ID)
+    if not ch or not role:
+        return
+
+    cache = load_yt_cache()
+    last_vid = cache.get("last_video_id")
+
+    feed_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={YT_CHANNEL_ID}"
+    try:
+        async with aiohttp.ClientSession(headers={"User-Agent":"Mozilla/5.0"}) as session:
+            async with session.get(feed_url, timeout=10) as resp:
+                if resp.status != 200:
+                    return
+                xml = await resp.text()
+        root = ET.fromstring(xml)
+        ns = {"atom":"http://www.w3.org/2005/Atom","yt":"http://www.youtube.com/xml/schemas/2015"}
+        entry = root.find("atom:entry", ns)
+        if entry is None:
+            return
+        vid = entry.findtext("yt:videoId", default="", namespaces=ns)
+        title = entry.findtext("atom:title", default="", namespaces=ns)
+        if not vid or vid == last_vid:
+            return
+
+        embed = discord.Embed(
+            title=title or "New upload!",
+            url=f"https://youtu.be/{vid}",
+            description="Mutapapa just uploaded on YouTube — click to watch! 🔔",
+            color=0xE62117
+        )
+        embed.set_image(url=f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg")
+        allowed = discord.AllowedMentions(roles=True, users=False, everyone=False)
+        await ch.send(content=role.mention, embed=embed, allowed_mentions=allowed)
+        save_yt_cache({"last_video_id": vid})
+    except Exception as e:
+        print(f"[yt-poll] error: {e}")
+
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} ({bot.user.id})")
@@ -743,13 +801,86 @@ async def on_ready():
     await db_init()
     await start_webserver()
 
-    # start loops
-    if not x_posts_loop.is_running():
-        x_posts_loop.start()
-    if not drops_loop.is_running():
-        drops_loop.start()
-    if not monthly_reset_loop.is_running():
-        monthly_reset_loop.start()
+    @tasks.loop(minutes=2)
+async def x_posts_loop():
+    """Announce only brand-new tweets by storing the last tweet ID (works for RSS or Nitter fallback)."""
+    guild = bot.get_guild(GUILD_ID)
+    if not guild:
+        return
+    ch = guild.get_channel(X_ANNOUNCE_CHANNEL_ID)
+    if not ch:
+        return
+
+    cache = load_x_cache()
+    last_tweet_id = cache.get("last_tweet_id")
+
+    # 1) Try RSS first
+    feeds = [X_RSS_URL] + [u for u in X_RSS_FALLBACKS if u != X_RSS_URL]
+    try:
+        xml = None
+        async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
+            for url in feeds:
+                try:
+                    async with session.get(url, timeout=10) as resp:
+                        if resp.status == 200:
+                            xml = await resp.text()
+                            break
+                except Exception:
+                    pass
+
+        if xml:
+            try:
+                root = ET.fromstring(xml)
+                channel = root.find("./channel")
+                items = channel.findall("item") if channel is not None else []
+                if items:
+                    item = items[0]
+                    title = (item.findtext("title") or "").strip()
+                    link  = (item.findtext("link")  or "").strip()
+                    tweet_id = _extract_tweet_id(link)
+                    if tweet_id and tweet_id != last_tweet_id:
+                        x_link = nitter_to_x(link) if link else f"https://x.com/{X_USERNAME}/status/{tweet_id}"
+                        embed = discord.Embed(
+                            title=title or "New post on X",
+                            description="Mutapapa just posted something on X (Formerly Twitter)!  Click to check it out!",
+                            url=x_link,
+                            color=0x1DA1F2
+                        )
+                        await ch.send(embed=embed)
+                        save_x_cache({"last_tweet_id": tweet_id})
+                        return
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # 2) Fallback: Nitter HTML via r.jina.ai — still only post if tweet_id changes
+    try:
+        mirror_url = f"https://r.jina.ai/http://nitter.net/{X_USERNAME}"
+        async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
+            async with session.get(mirror_url, timeout=10) as resp:
+                if resp.status != 200:
+                    return
+                text = await resp.text()
+    except Exception:
+        return
+
+    tweet_id = nitter_latest_id_from_html(text)
+    if not tweet_id or tweet_id == last_tweet_id:
+        return
+
+    x_link = f"https://x.com/{X_USERNAME}/status/{tweet_id}"
+    embed = discord.Embed(
+        title="New post on X",
+        description="Mutapapa just posted something on X (Formerly Twitter)!  Click to check it out!",
+        url=x_link,
+        color=0x1DA1F2
+    )
+    try:
+        await ch.send(embed=embed)
+        save_x_cache({"last_tweet_id": tweet_id})
+    except Exception:
+        pass
 
 # ================== MESSAGE HANDLING ==================
 @bot.event
