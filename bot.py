@@ -740,6 +740,47 @@ def build_commands_embed(author: discord.Member) -> discord.Embed:
     return embed
 
 # ================== BACKGROUND LOOPS ==================
+# --- Auto-promotion: Newcomer -> Member after 3 days ---
+PROMOTE_AFTER = timedelta(days=3)
+
+@tasks.loop(hours=6)
+async def newcomer_promote_loop():
+    """Every 6h, promote users who've been in the server >= 3 days."""
+    guild = bot.get_guild(GUILD_ID)
+    if not guild:
+        return
+
+    newcomer = guild.get_role(NEWCOMER_ROLE_ID)
+    member   = guild.get_role(MEMBER_ROLE_ID)
+    if not newcomer or not member:
+        return  # misconfigured IDs or missing roles
+
+    now = datetime.now(tz=TZ)
+
+    for m in guild.members:
+        # Must currently have Newcomer and not already have Member
+        if not (newcomer in m.roles and member not in m.roles):
+            continue
+
+        # joined_at can be None in rare cases; skip safely
+        if not m.joined_at:
+            continue
+
+        joined_local = m.joined_at.astimezone(TZ)
+        if now - joined_local >= PROMOTE_AFTER:
+            try:
+                # Give Member first (in case removing Newcomer fails)
+                await m.add_roles(member, reason="Auto-promotion after 3 days in server")
+                await m.remove_roles(newcomer, reason="Auto-promotion after 3 days in server")
+                # Optional: log it to your mod log channel
+                modlog = guild.get_channel(MOD_LOG_CHANNEL_ID)
+                if modlog:
+                    await modlog.send(f"✅ Auto-promoted {m.mention} to <@&{MEMBER_ROLE_ID}> (joined {joined_local:%Y-%m-%d %H:%M %Z}).")
+            except discord.Forbidden:
+                print("[promote] Missing permissions or role order prevents promotion.")
+            except Exception as e:
+                print(f"[promote] Unexpected error: {e}")
+
 def _today_key(now: datetime) -> str:
     return now.strftime("%Y%m%d")
 
@@ -995,6 +1036,29 @@ async def monthly_reset_loop():
             pass
 
 # ================== DISCORD EVENTS ==================
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user} ({bot.user.id})")
+    await db_init()
+    try:
+        await start_webserver()
+    except Exception as e:
+        print(f"[web] error: {e}")
+
+    if not yt_poll_loop.is_running(): yt_poll_loop.start()
+    if not x_posts_loop.is_running():  x_posts_loop.start()
+    if not drops_loop.is_running():    drops_loop.start()
+    if not monthly_reset_loop.is_running(): monthly_reset_loop.start()
+    # NEW: start auto-promotion loop
+    if not newcomer_promote_loop.is_running(): newcomer_promote_loop.start()
+
+    base = os.getenv("WEB_PUBLIC_BASE_URL", "").strip()
+    if base:
+        try:
+            await websub_subscribe(base)
+        except Exception as e:
+            print(f"[yt-websub] subscribe error: {e}")
+
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} ({bot.user.id})")
