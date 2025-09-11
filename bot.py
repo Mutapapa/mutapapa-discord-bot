@@ -24,11 +24,11 @@ from discord.ui import View, button
 GUILD_ID = 1411205177880608831
 
 WELCOME_CHANNEL_ID = 1411946767414591538
-NEWCOMER_ROLE_ID   = 1411957261009555536
-MEMBER_ROLE_ID     = 1411938410041708585
+NEWCOMER_ROLE_ID   = 1411957261009555536  # newcomer (3 days)
+MEMBER_ROLE_ID     = 1411938410041708585  # member (after 3d)
 MOD_LOG_CHANNEL_ID = 1413297073348018299
 
-# Season reset announcement channels
+# Season reset announcements
 SEASON_RESET_ANNOUNCE_CHANNEL_IDS = [
     1414000088790863874,
     1411931034026643476,
@@ -61,22 +61,15 @@ MONITORED_CHANNEL_IDS = [
     1411930689460240395, 1411931034026643476
 ]
 
-# YouTube (WebSub push + fallback poll)
+# YouTube (WebSub push + poll fallback)
 YT_CHANNEL_ID          = "UCSLxLMfxnFRxyhNOZMy4i9w"
 YT_ANNOUNCE_CHANNEL_ID = 1412144563144888452
-YT_PING_ROLE_ID        = 1412989373556850829
+YT_PING_ROLE_ID        = 1412989373556850829  # Upload Ping
 YT_CALLBACK_PATH       = "/yt/webhook"
 YT_HUB                 = "https://pubsubhubbub.appspot.com"
-YT_SECRET              = "mutapapa-youtube"  # keep in env ideally
+YT_SECRET              = "mutapapa-youtube"
 
-# YouTube ping role (Upload Ping)
-YT_PING_ROLE_ID = 1412989373556850829
-
-# X/Twitter ping role
-X_PING_ROLE_ID  = 1414001344297172992
-
-
-# X / Twitter via Nitter/Bridge
+# X / Twitter
 X_USERNAME = "Real_Mutapapa"
 X_RSS_FALLBACKS = [
     f"https://nitter.net/{X_USERNAME}/rss",
@@ -85,9 +78,11 @@ X_RSS_FALLBACKS = [
 ]
 X_RSS_URL = os.getenv("X_RSS_URL") or X_RSS_FALLBACKS[0]
 X_ANNOUNCE_CHANNEL_ID = 1414000975680897128
+X_PING_ROLE_ID        = 1414001344297172992  # X ping role
+X_CACHE_FILE = "x_last_tweet.json"
 
-# Banners / misc
-BANNER_URL = "https://cdn.discordapp.com/attachments/1411930091109224479/1413654925602459769/Welcome_to_the_Mutapapa_Official_Discord_Server_Image.png?ex=68bcb83e&is=68bb66be&hm=f248257c26608d0ee69b8baab82f62aea768f15f090ad318617e68350fe3b5ac&"
+# Banner image
+BANNER_URL = "https://cdn.discordapp.com/attachments/1411930091109224479/1413654925602459769/Welcome_to_the_Mutapapa_Official_Discord_Server_Image.png"
 
 # Bug review + penalty approvals
 BUGS_REVIEW_CHANNEL_ID = 1414124214956593242
@@ -97,18 +92,14 @@ PENALTY_CHANNEL_ID     = 1414124795418640535  # rule-break penalty confirm butto
 CASH_DROP_CHANNEL_ID = 1414120740327788594
 
 # Helpful channels
-CASH_ANNOUNCE_CHANNEL_ID   = 1414124134903844936
-LEADERBOARD_CHANNEL_ID     = 1414124214956593242  # can be same as bug review
+CASH_ANNOUNCE_CHANNEL_ID = 1414124134903844936
+LEADERBOARD_CHANNEL_ID   = 1414124214956593242
 
 # Age Gate defaults (persisted to config.json)
 CONFIG_FILE = "config.json"
 
 # Giveaways (persisted)
 GIVEAWAYS_FILE = "giveaways.json"
-
-# YouTube & X caches
-YT_CACHE_FILE = "yt_last_video.json"
-X_CACHE_FILE  = "x_last_item.json"
 
 # Edmonton time
 TZ = ZoneInfo("America/Edmonton")
@@ -131,8 +122,7 @@ def tier_bonus(msg_len: int) -> int:
     if msg_len <= 99: return 80
     return 100
 
-# Random drops — scheduled at random times across the full day
-DROPS_PER_DAY     = 4      # the scheduler will randomly choose 3 or 4
+# Random drops — scheduled at random times across the full day (persisted)
 DROP_AMOUNT       = 225
 DROP_WORD_COUNT   = 4
 
@@ -147,19 +137,20 @@ ROLE_SPECIALIST  = 1414818845541138493  # Specialist
 ROLE_OPERATIVE   = 1414819588448718880  # Operative
 ROLE_LEGEND      = 1414819897602474057  # Legend
 
-# Activity thresholds (points) — tied strictly to chat-earned credit
 ACTIVITY_THRESHOLDS = [
-    (ROLE_ROOKIE,     5_000),     # ~3 days of active chatting
-    (ROLE_SQUAD,     25_000),     # ~2 weeks
-    (ROLE_SPECIALIST, 75_000),    # ~1–1.5 months
-    (ROLE_OPERATIVE, 180_000),    # ~3 months
-    (ROLE_LEGEND,    400_000),    # ~6–7 months; “typed A LOT”
+    (ROLE_ROOKIE,      5_000),
+    (ROLE_SQUAD,      25_000),
+    (ROLE_SPECIALIST, 75_000),
+    (ROLE_OPERATIVE, 180_000),
+    (ROLE_LEGEND,    400_000),
 ]
 
 # Roles allowed to see mod-only commands
 HELP_MOD_ROLE_IDS = {1413663966349234320, 1411940485005578322, 1413991410901713088}
 
-# ================== PERSIST HELPERS ==================
+# ================== FILE PERSIST HELPERS ==================
+YT_CACHE_FILE = "yt_last_video.json"
+
 def load_json(path, default):
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -189,12 +180,6 @@ def load_x_cache():
 def save_x_cache(d):
     save_json(X_CACHE_FILE, d)
 
-def load_yt_cache():
-    return load_json(YT_CACHE_FILE, {})
-
-def save_yt_cache(d):
-    save_json(YT_CACHE_FILE, d)
-
 def load_count_state():
     d = load_json(COUNT_STATE_FILE, {"expected_next": 1, "goal": 67})
     d.setdefault("expected_next", 1)
@@ -210,6 +195,12 @@ def load_giveaways():
 
 def save_giveaways(d):
     save_json(GIVEAWAYS_FILE, d)
+
+def load_yt_cache():
+    return load_json(YT_CACHE_FILE, {})
+
+def save_yt_cache(d):
+    save_json(YT_CACHE_FILE, d)
 
 CONFIG      = load_config()
 COUNT_STATE = load_count_state()
@@ -262,7 +253,7 @@ async def db_init():
         );
         """)
         await con.execute("ALTER TABLE muta_users ADD COLUMN IF NOT EXISTS activity_points BIGINT NOT NULL DEFAULT 0;")
-        await con.execute("ALTER TABLE muta_users ADD COLUMN IF NOT EXISTS today_earned BIGINT NOT NULL DEFAULT 0;")
+        await con.execute("ALTER TABLE muta_users ADD COLUMN IF NOT EXISTS today_earned  BIGINT NOT NULL DEFAULT 0;")
 
         # drops
         await con.execute("""
@@ -277,7 +268,7 @@ async def db_init():
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         """)
-        await con.execute("""CREATE INDEX IF NOT EXISTS idx_muta_drops_created_at ON muta_drops (created_at);""")
+        await con.execute("CREATE INDEX IF NOT EXISTS idx_muta_drops_created_at ON muta_drops (created_at);")
 
 async def db_fetchrow(query, *args):
     async with _pool.acquire() as con:
@@ -302,6 +293,251 @@ async def db_set_meta(key: str, value: str) -> None:
         "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
         key, value
     )
+
+# ================== SMALL HELPERS ==================
+def humanize_seconds(sec: int) -> str:
+    if sec % (24*3600) == 0: return f"{sec // (24*3600)}d"
+    if sec % 3600 == 0:      return f"{sec // 3600}h"
+    if sec % 60 == 0:        return f"{sec // 60}m"
+    return f"{sec}s"
+
+def parse_duration_to_seconds(s: str):
+    s = s.strip().lower()
+    chunks = s.split()
+    total = 0
+    if len(chunks) > 1:
+        for part in chunks:
+            m = re.fullmatch(r"(\d+)\s*([dhm])", part)
+            if not m: return None
+            n, unit = int(m.group(1)), m.group(2)
+            total += n*24*3600 if unit=="d" else n*3600 if unit=="h" else n*60
+        return total
+    m = re.fullmatch(r"(\d+)\s*([dhm])", s)
+    if not m: return None
+    n, unit = int(m.group(1)), m.group(2)
+    return n*24*3600 if unit=="d" else n*3600 if unit=="h" else n*60
+
+def normalize_text(s: str) -> str:
+    s = s.lower()
+    s = re.sub(r"[_*~`>]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+def four_words():
+    words = ["alpha","bravo","charlie","delta","eagle","frost","glow","hyper","ionic","jelly",
+             "kyro","lumen","mango","nova","onyx","prism","quantum","raven","solar","tango",
+             "ultra","vivid","wax","xeno","yodel","zen"]
+    return " ".join(random.choice(words) for _ in range(DROP_WORD_COUNT))
+
+async def try_delete(msg: discord.Message):
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+# ================== X helpers ==================
+_TWEET_ID_RE = re.compile(r"/status/(\d+)")
+def _extract_tweet_id(link: str) -> str | None:
+    m = _TWEET_ID_RE.search(link or "")
+    return m.group(1) if m else None
+
+TWEET_LINK_RE = re.compile(r"/" + re.escape(X_USERNAME) + r"/status/(\d+)")
+def nitter_latest_id_from_html(text: str) -> str | None:
+    m = TWEET_LINK_RE.search(text or "")
+    return m.group(1) if m else None
+
+def nitter_to_x(url: str) -> str:
+    return url.replace("https://nitter.net", "https://x.com")
+
+# ================== ECONOMY / USERS ==================
+async def ensure_user(uid: int):
+    await db_execute(
+        "INSERT INTO muta_users(user_id) VALUES($1) ON CONFLICT (user_id) DO NOTHING",
+        uid
+    )
+
+async def add_cash(uid: int, amount: int) -> int:
+    await ensure_user(uid)
+    row = await db_fetchrow(
+        "UPDATE muta_users SET cash = cash + $1 WHERE user_id=$2 RETURNING cash",
+        amount, uid
+    )
+    return int(row["cash"]) if row else 0
+
+async def deduct_cash(uid: int, amount: int) -> int:
+    await ensure_user(uid)
+    row = await db_fetchrow(
+        "UPDATE muta_users SET cash = GREATEST(0, cash - $1) WHERE user_id=$2 RETURNING cash",
+        amount, uid
+    )
+    return int(row["cash"]) if row else 0
+
+async def can_bug_reward(uid: int) -> bool:
+    await ensure_user(uid)
+    now = datetime.now(tz=TZ)
+    key = f"bug_month:{now.year}-{now.month}"
+    flag = await db_get_meta(key)
+    if flag != "ok":
+        await db_execute("UPDATE muta_users SET bug_rewards_this_month = 0")
+        await db_set_meta(key, "ok")
+    row = await db_fetchrow("SELECT bug_rewards_this_month FROM muta_users WHERE user_id=$1", uid)
+    return (row and int(row["bug_rewards_this_month"]) < BUG_REWARD_LIMIT_PER_MONTH)
+
+async def mark_bug_reward(uid: int):
+    await ensure_user(uid)
+    await db_execute(
+        "UPDATE muta_users SET bug_rewards_this_month = bug_rewards_this_month + 1 WHERE user_id=$1",
+        uid
+    )
+
+async def leaderboard_top(n: int = 10):
+    return await db_fetch("SELECT user_id, cash FROM muta_users ORDER BY cash DESC LIMIT $1", n)
+
+async def monthly_reset():
+    await db_execute("UPDATE muta_users SET cash = 0, today_earned = 0")
+
+async def assign_activity_roles(member: discord.Member, points: int):
+    if not member or not member.guild:
+        return
+    to_grant = []
+    for role_id, threshold in ACTIVITY_THRESHOLDS:
+        if role_id and points >= threshold:
+            role = member.guild.get_role(role_id)
+            if role and role not in member.roles:
+                to_grant.append(role)
+    if to_grant:
+        try:
+            await member.add_roles(*to_grant, reason=f"Reached activity thresholds (points={points})")
+        except Exception as e:
+            print(f"[levels] add_roles error: {e}")
+
+async def earn_for_message(uid: int, now: datetime, msg_len: int, guild: discord.Guild | None, author_id: int):
+    await ensure_user(uid)
+    row = await db_fetchrow("SELECT cash, last_earn_ts, today_earned, activity_points FROM muta_users WHERE user_id=$1", uid)
+    last_ts = row["last_earn_ts"]
+    today_earned = int(row["today_earned"] or 0)
+    activity_points = int(row["activity_points"] or 0)
+
+    if last_ts is not None:
+        last_local = last_ts.astimezone(TZ)
+        if (last_local.date() != now.date()):
+            today_earned = 0
+
+    if today_earned >= DAILY_CAP:
+        return 0
+
+    if last_ts is not None and (now - last_ts).total_seconds() < EARN_COOLDOWN_SEC:
+        return 0
+
+    base = EARN_PER_TICK + tier_bonus(msg_len)
+    if DOUBLE_CASH:
+        base *= 2
+    grant = min(base, max(0, DAILY_CAP - today_earned))
+
+    new_today = today_earned + grant
+    new_points = activity_points + grant
+    await db_execute(
+        "UPDATE muta_users SET cash = cash + $1, last_earn_ts = $2, today_earned = $3, activity_points = $4 WHERE user_id=$5",
+        grant, now, new_today, new_points, uid
+    )
+
+    if guild:
+        member = guild.get_member(author_id)
+        if member:
+            await assign_activity_roles(member, new_points)
+
+    return grant
+
+# ================== VIEWS (Penalty + Bug Approvals) ==================
+class PenaltyView(View):
+    def __init__(self, target_id: int, amount: int):
+        super().__init__(timeout=300)
+        self.target_id = target_id
+        self.amount = amount
+
+    @button(label="Yes (deduct)", style=discord.ButtonStyle.danger, emoji="⚠️", custom_id="pen_yes")
+    async def yes_btn(self, interaction: discord.Interaction, _):
+        if not interaction.user.guild_permissions.manage_messages:
+            return await interaction.response.send_message("Mods only.", ephemeral=True)
+        new_bal = await deduct_cash(self.target_id, self.amount)
+        await interaction.response.edit_message(
+            content=f"✅ Deducted {self.amount}. New balance for <@{self.target_id}>: {new_bal}", view=None
+        )
+
+    @button(label="No", style=discord.ButtonStyle.secondary, emoji="❌", custom_id="pen_no")
+    async def no_btn(self, interaction: discord.Interaction, _):
+        if not interaction.user.guild_permissions.manage_messages:
+            return await interaction.response.send_message("Mods only.", ephemeral=True)
+        await interaction.response.edit_message(content="❎ Deduction cancelled.", view=None)
+
+class BugApproveView(View):
+    def __init__(self, reporter_id: int, description: str):
+        super().__init__(timeout=600)
+        self.reporter_id = reporter_id
+        self.description = description
+
+    @button(label="Approve", style=discord.ButtonStyle.success, emoji="✅", custom_id="bug_yes")
+    async def approve(self, interaction: discord.Interaction, _):
+        if not interaction.user.guild_permissions.manage_messages:
+            return await interaction.response.send_message("Mods only.", ephemeral=True)
+        if not await can_bug_reward(self.reporter_id):
+            return await interaction.response.send_message("This user already reached this month’s bug reward limit.", ephemeral=True)
+        await add_cash(self.reporter_id, BUG_REWARD_AMOUNT)
+        await mark_bug_reward(self.reporter_id)
+        await interaction.response.edit_message(
+            content=f"🛠️ Bug approved. <@{self.reporter_id}> received **{BUG_REWARD_AMOUNT}** cash.\n> {self.description}",
+            view=None
+        )
+
+    @button(label="Reject", style=discord.ButtonStyle.secondary, emoji="❌", custom_id="bug_no")
+    async def reject(self, interaction: discord.Interaction, _):
+        if not interaction.user.guild_permissions.manage_messages:
+            return await interaction.response.send_message("Mods only.", ephemeral=True)
+        await interaction.response.edit_message(content="Bug report rejected.", view=None)
+
+# ================== HELP / COMMANDS EMBED ==================
+def build_commands_embed(author: discord.Member) -> discord.Embed:
+    show_mod = any((r.id in HELP_MOD_ROLE_IDS) for r in getattr(author, "roles", [])) or author.guild_permissions.administrator
+
+    embed = discord.Embed(
+        title="📜 Mutapapa Bot Commands",
+        description="Here’s a list of commands available on this bot.",
+        color=0x5865F2
+    )
+
+    everyone = [
+        ("!ping", "Check if the bot is alive. Responds with 'pong 🏓'."),
+        ("!balance | !bal | !cashme | !mycash", "See how much Mutapapa Cash you have."),
+        ("!leaderboard", "Shows the Top 10 richest users on the server."),
+        (f"!cash <{DROP_WORD_COUNT} words>", "Claim a **cash drop** when it appears. Example: `!cash alpha bravo charlie delta`."),
+        ("!bugreport <description>", f"Report a Jailbreak bug. If approved by mods, you earn **{BUG_REWARD_AMOUNT} cash** (max {BUG_REWARD_LIMIT_PER_MONTH}/month)."),
+        ("!countstatus", "Check the counting game progress: the next number & the goal."),
+    ]
+    ev_lines = [f"**{name}**\n{desc}" for name, desc in everyone]
+    embed.add_field(name="👥 Everyone", value="\n\n".join(ev_lines), inline=False)
+
+    if show_mod:
+        admin = [
+            ("!send <message>", "Make the bot send a message as itself."),
+            ("!sendreact <message>", "Post a message in the reaction-role channel and auto-add 📺 🔔 ✖️ 🎉."),
+            ("!gstart <duration> | <winners> | <title> | <desc>",
+             "Start a giveaway. Examples:\n"
+             "`!gstart 1h | 1 | 100 Robux | Join now!`\n"
+             "`!gstart 0h 1m | 1 | Flash Drop | Hurry!`"),
+            ("!gend", "Ends the most recent active giveaway immediately."),
+            ("!greroll", "Rerolls the most recent giveaway (picks new winners)."),
+            ("!countgoal <number>", "Set the counting goal."),
+            ("!countnext <number>", "Force the next expected number."),
+            ("!countreset", "Reset counting back to 1."),
+            ("!doublecash on|off", "Turn double-cash earnings on or off."),
+            ("!addcash @user <amount> [reason] | !add ...", "Give cash to a user."),
+            ("!removecash @user <amount> [reason] | !remove ...", "Remove cash from a user."),
+        ]
+        ad_lines = [f"**{name}**\n{desc}" for name, desc in admin]
+        embed.add_field(name="🛠️ Admin / Mods", value="\n\n".join(ad_lines), inline=False)
+
+    embed.set_footer(text="Durations support d/h/m, e.g. '1d', '2h 30m', or '0h 1m'. Activity roles are earned by consistent chatting.")
+    return embed
 
 # ================== AIOHTTP (YouTube webhook) ==================
 app = web.Application()
@@ -342,12 +578,12 @@ async def yt_webhook_handler(request: web.Request):
             ch   = guild.get_channel(YT_ANNOUNCE_CHANNEL_ID)
             role = guild.get_role(YT_PING_ROLE_ID)
             if ch and role:
-                # EXACT FORMAT:
-                header   = f"**{title}**"
-                tagline  = f"{role.mention} Mutapapa just released a new video called: **{title}** — Click to watch it!"
+                # EXACT FORMAT (no @everyone):
+                header  = f"**{title}**"
+                tagline = f"{role.mention} Mutapapa just released a new video called: **{title}** — Click to watch it!"
                 embed = discord.Embed(
                     title=title or "New upload!",
-                    url=f"https://youtu.be/{vid}",  # works for Shorts as well
+                    url=f"https://youtu.be/{vid}",  # works for Shorts too
                     description="",
                     color=0xE62117
                 )
@@ -357,6 +593,37 @@ async def yt_webhook_handler(request: web.Request):
                 print(f"[yt-webhook] announced {vid}")
 
     return web.Response(text="ok")
+
+async def health(_):
+    return web.Response(text="ok")
+
+app.add_routes([
+    web.get(YT_CALLBACK_PATH, yt_webhook_handler),
+    web.post(YT_CALLBACK_PATH, yt_webhook_handler),
+    web.get("/health", health),
+])
+
+runner = web.AppRunner(app)
+
+async def start_webserver():
+    await runner.setup()
+    port = int(os.getenv("PORT", "8080"))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"[yt-webhook] listening on 0.0.0.0:{port}{YT_CALLBACK_PATH}")
+
+async def websub_subscribe(public_base_url: str):
+    topic = f"https://www.youtube.com/feeds/videos.xml?channel_id={YT_CHANNEL_ID}"
+    callback = f"{public_base_url.rstrip('/')}{YT_CALLBACK_PATH}"
+    data = {"hub.mode":"subscribe","hub.topic":topic,"hub.callback":callback,"hub.verify":"async"}
+    if YT_SECRET:
+        data["hub.secret"] = YT_SECRET
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{YT_HUB}/subscribe", data=data, timeout=10) as resp:
+                print(f"[yt-webhook] subscribe {resp.status} -> {callback}")
+    except Exception as e:
+        print(f"[yt-webhook] subscribe error: {e}")
 
 # ================== GIVEAWAYS ==================
 class GiveawayView(View):
@@ -453,630 +720,19 @@ async def end_giveaway(message_id: int):
     GIVEAWAYS[mid] = gw
     save_giveaways(GIVEAWAYS)
 
-# ================== ECONOMY / USERS ==================
-async def ensure_user(uid: int):
-    await db_execute(
-        "INSERT INTO muta_users(user_id) VALUES($1) ON CONFLICT (user_id) DO NOTHING",
-        uid
-    )
-
-async def add_cash(uid: int, amount: int) -> int:
-    await ensure_user(uid)
-    row = await db_fetchrow(
-        "UPDATE muta_users SET cash = cash + $1 WHERE user_id=$2 RETURNING cash",
-        amount, uid
-    )
-    return int(row["cash"]) if row else 0
-
-async def deduct_cash(uid: int, amount: int) -> int:
-    await ensure_user(uid)
-    row = await db_fetchrow(
-        "UPDATE muta_users SET cash = GREATEST(0, cash - $1) WHERE user_id=$2 RETURNING cash",
-        amount, uid
-    )
-    return int(row["cash"]) if row else 0
-
-async def can_bug_reward(uid: int) -> bool:
-    await ensure_user(uid)
-    now = datetime.now(tz=TZ)
-    key = f"bug_month:{now.year}-{now.month}"
-    flag = await db_get_meta(key)
-    if flag != "ok":
-        await db_execute("UPDATE muta_users SET bug_rewards_this_month = 0")
-        await db_set_meta(key, "ok")
-    row = await db_fetchrow("SELECT bug_rewards_this_month FROM muta_users WHERE user_id=$1", uid)
-    return (row and int(row["bug_rewards_this_month"]) < BUG_REWARD_LIMIT_PER_MONTH)
-
-async def mark_bug_reward(uid: int):
-    await ensure_user(uid)
-    await db_execute(
-        "UPDATE muta_users SET bug_rewards_this_month = bug_rewards_this_month + 1 WHERE user_id=$1",
-        uid
-    )
-
-async def leaderboard_top(n: int = 10):
-    return await db_fetch("SELECT user_id, cash FROM muta_users ORDER BY cash DESC LIMIT $1", n)
-
-async def monthly_reset():
-    await db_execute("UPDATE muta_users SET cash = 0, today_earned = 0")
-
-def humanize_seconds(sec: int) -> str:
-    if sec % (24*3600) == 0: return f"{sec // (24*3600)}d"
-    if sec % 3600 == 0:      return f"{sec // 3600}h"
-    if sec % 60 == 0:        return f"{sec // 60}m"
-    return f"{sec}s"
-
-def parse_duration_to_seconds(s: str):
-    s = s.strip().lower()
-    chunks = s.split()
-    total = 0
-    if len(chunks) > 1:
-        for part in chunks:
-            m = re.fullmatch(r"(\d+)\s*([dhm])", part)
-            if not m: return None
-            n, unit = int(m.group(1)), m.group(2)
-            total += n*24*3600 if unit=="d" else n*3600 if unit=="h" else n*60
-        return total
-    m = re.fullmatch(r"(\d+)\s*([dhm])", s)
-    if not m: return None
-    n, unit = int(m.group(1)), m.group(2)
-    return n*24*3600 if unit=="d" else n*3600 if unit=="h" else n*60
-
-async def assign_activity_roles(member: discord.Member, points: int):
-    """Grant roles for which the member qualifies. Keeps all earned roles."""
-    if not member or not member.guild:
-        return
-    to_grant = []
-    for role_id, threshold in ACTIVITY_THRESHOLDS:
-        if role_id and points >= threshold:
-            role = member.guild.get_role(role_id)
-            if role and role not in member.roles:
-                to_grant.append(role)
-    if to_grant:
-        try:
-            await member.add_roles(*to_grant, reason=f"Reached activity thresholds (points={points})")
-        except Exception as e:
-            print(f"[levels] add_roles error: {e}")
-
-async def earn_for_message(uid: int, now: datetime, msg_len: int, guild: discord.Guild | None, author_id: int):
-    """Earning logic for normal messages. Also increments activity_points and handles auto-roles."""
-    await ensure_user(uid)
-
-    row = await db_fetchrow("SELECT cash, last_earn_ts, today_earned, activity_points FROM muta_users WHERE user_id=$1", uid)
-    last_ts = row["last_earn_ts"]
-    today_earned = int(row["today_earned"] or 0)
-    activity_points = int(row["activity_points"] or 0)
-
-    # reset daily (local) for the daily cap
-    if last_ts is not None:
-        last_local = last_ts.astimezone(TZ)
-        if (last_local.date() != now.date()):
-            today_earned = 0
-
-    if today_earned >= DAILY_CAP:
-        return 0
-
-    if last_ts is not None and (now - last_ts).total_seconds() < EARN_COOLDOWN_SEC:
-        return 0
-
-    base = EARN_PER_TICK + tier_bonus(msg_len)
-    if DOUBLE_CASH:
-        base *= 2
-
-    grant = min(base, max(0, DAILY_CAP - today_earned))
-
-    # Update: cash + today_earned + activity_points (only from chatting)
-    new_today = today_earned + grant
-    new_points = activity_points + grant  # tie activity to actual earnable message credit
-    await db_execute(
-        "UPDATE muta_users SET cash = cash + $1, last_earn_ts = $2, today_earned = $3, activity_points = $4 WHERE user_id=$5",
-        grant, now, new_today, new_points, uid
-    )
-
-    # Role check
-    if guild:
-        member = guild.get_member(author_id)
-        if member:
-            await assign_activity_roles(member, new_points)
-
-    return grant
-
-# ================== TEXT NORMALIZATION / CROSS-TRADE ==================
-def normalize_text(s: str) -> str:
-    s = s.lower()
-    s = re.sub(r"[_*~`>]", " ", s)
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
-
-BUY_SELL_WORDS = {
-    "cross-trade", "cross trade", "blackmarket", "bm", "robux", "paypal", "venmo",
-    "crypto", "btc", "eth", "real money", "sell robux", "buy robux", "cashapp"
-}
-CROSSTRADE_HINTS = {
-    "dm me to buy", "selling for cash", "buying with cash", "pay real money", "outside discord"
-}
-CROSSTRADE_PATTERNS = [
-    re.compile(r"sell(?:ing)?\s+\d+\s*robux", re.I),
-    re.compile(r"buy(?:ing)?\s+\d+\s*robux", re.I),
-    re.compile(r"\b(pp|paypal|btc|eth|cashapp|venmo)\b", re.I),
-]
-
-# ================== X helpers ==================
-_TWEET_ID_RE = re.compile(r"/status/(\d+)")
-
-def _extract_tweet_id(link: str) -> str | None:
-    m = _TWEET_ID_RE.search(link or "")
-    return m.group(1) if m else None
-
-def nitter_latest_id_from_html(text: str) -> str | None:
-    m = re.search(rf"/{re.escape(X_USERNAME)}/status/(\d+)", text)
-    return m.group(1) if m else None
-
-def nitter_to_x(url: str) -> str:
-    return url.replace("https://nitter.net", "https://x.com")
-
-def four_words():
-    words = ["alpha","bravo","charlie","delta","eagle","frost","glow","hyper","ionic","jelly",
-             "kyro","lumen","mango","nova","onyx","prism","quantum","raven","solar","tango",
-             "ultra","vivid","wax","xeno","yodel","zen"]
-    return " ".join(random.choice(words) for _ in range(DROP_WORD_COUNT))
-
-async def try_delete(msg: discord.Message):
-    try:
-        await msg.delete()
-    except Exception:
-        pass
-
-# ================== VIEWS (Penalty + Bug Approvals) ==================
-class PenaltyView(View):
-    def __init__(self, target_id: int, amount: int):
-        super().__init__(timeout=300)
-        self.target_id = target_id
-        self.amount = amount
-
-    @button(label="Yes (deduct)", style=discord.ButtonStyle.danger, emoji="⚠️", custom_id="pen_yes")
-    async def yes_btn(self, interaction: discord.Interaction, _):
-        if not interaction.user.guild_permissions.manage_messages:
-            return await interaction.response.send_message("Mods only.", ephemeral=True)
-        new_bal = await deduct_cash(self.target_id, self.amount)
-        await interaction.response.edit_message(
-            content=f"✅ Deducted {self.amount}. New balance for <@{self.target_id}>: {new_bal}", view=None
-        )
-
-    @button(label="No", style=discord.ButtonStyle.secondary, emoji="❌", custom_id="pen_no")
-    async def no_btn(self, interaction: discord.Interaction, _):
-        if not interaction.user.guild_permissions.manage_messages:
-            return await interaction.response.send_message("Mods only.", ephemeral=True)
-        await interaction.response.edit_message(content="❎ Deduction cancelled.", view=None)
-
-class BugApproveView(View):
-    def __init__(self, reporter_id: int, description: str):
-        super().__init__(timeout=600)
-        self.reporter_id = reporter_id
-        self.description = description
-
-    @button(label="Approve", style=discord.ButtonStyle.success, emoji="✅", custom_id="bug_yes")
-    async def approve(self, interaction: discord.Interaction, _):
-        if not interaction.user.guild_permissions.manage_messages:
-            return await interaction.response.send_message("Mods only.", ephemeral=True)
-        if not await can_bug_reward(self.reporter_id):
-            return await interaction.response.send_message("This user already reached this month’s bug reward limit.", ephemeral=True)
-        await add_cash(self.reporter_id, BUG_REWARD_AMOUNT)
-        await mark_bug_reward(self.reporter_id)
-        await interaction.response.edit_message(
-            content=f"🛠️ Bug approved. <@{self.reporter_id}> received **{BUG_REWARD_AMOUNT}** cash.\n> {self.description}",
-            view=None
-        )
-
-    @button(label="Reject", style=discord.ButtonStyle.secondary, emoji="❌", custom_id="bug_no")
-    async def reject(self, interaction: discord.Interaction, _):
-        if not interaction.user.guild_permissions.manage_messages:
-            return await interaction.response.send_message("Mods only.", ephemeral=True)
-        await interaction.response.edit_message(content="Bug report rejected.", view=None)
-
-# ================== HELP / COMMANDS EMBED ==================
-def build_commands_embed(author: discord.Member) -> discord.Embed:
-    show_mod = any((r.id in HELP_MOD_ROLE_IDS) for r in getattr(author, "roles", [])) or author.guild_permissions.administrator
-
-    embed = discord.Embed(
-        title="📜 Mutapapa Bot Commands",
-        description="Here’s a list of commands available on this bot.",
-        color=0x5865F2
-    )
-
-    everyone = [
-        ("!ping", "Check if the bot is alive. Responds with 'pong 🏓'."),
-        ("!balance | !bal | !cashme | !mycash", "See how much Mutapapa Cash you have."),
-        ("!leaderboard", "Shows the Top 10 richest users on the server."),
-        (f"!cash <{DROP_WORD_COUNT} words>", "Claim a **cash drop** when it appears. Example: `!cash alpha bravo charlie delta`."),
-        ("!bugreport <description>", f"Report a Jailbreak bug. If approved by mods, you earn **{BUG_REWARD_AMOUNT} cash** (max {BUG_REWARD_LIMIT_PER_MONTH}/month)."),
-        ("!countstatus", "Check the counting game progress: the next number & the goal."),
-    ]
-    ev_lines = [f"**{name}**\n{desc}" for name, desc in everyone]
-    embed.add_field(name="👥 Everyone", value="\n\n".join(ev_lines), inline=False)
-
-    if show_mod:
-        admin = [
-            ("!send <message>", "Make the bot send a message as itself."),
-            ("!sendreact <message>", "Post a message in the reaction-role channel and auto-add 📺 🔔 ✖️ 🎉."),
-            ("!gstart <duration> | <winners> | <title> | <desc>",
-             "Start a giveaway. Examples:\n"
-             "`!gstart 1h | 1 | 100 Robux | Join now!`\n"
-             "`!gstart 0h 1m | 1 | Flash Drop | Hurry!`"),
-            ("!gend", "Ends the most recent active giveaway immediately."),
-            ("!greroll", "Rerolls the most recent giveaway (picks new winners)."),
-            ("!countgoal <number>", "Set the counting goal."),
-            ("!countnext <number>", "Force the next expected number."),
-            ("!countreset", "Reset counting back to 1."),
-            ("!doublecash on|off", "Turn double-cash earnings on or off."),
-            ("!addcash @user <amount> [reason] | !add ...", "Give cash to a user."),
-            ("!removecash @user <amount> [reason] | !remove ...", "Remove cash from a user."),
-        ]
-        ad_lines = [f"**{name}**\n{desc}" for name, desc in admin]
-        embed.add_field(name="🛠️ Admin / Mods", value="\n\n".join(ad_lines), inline=False)
-
-    embed.set_footer(text="Durations support d/h/m, e.g. '1d', '2h 30m', or '0h 1m'. Activity roles are earned by consistent chatting.")
-    return embed
-
-# ================== BACKGROUND LOOPS ==================
-# --- Auto-promotion: Newcomer -> Member after 3 days ---
-PROMOTE_AFTER = timedelta(days=3)
-
-@tasks.loop(hours=6)
-async def newcomer_promote_loop():
-    """Every 6h, promote users who've been in the server >= 3 days."""
-    guild = bot.get_guild(GUILD_ID)
-    if not guild:
-        return
-
-    newcomer = guild.get_role(NEWCOMER_ROLE_ID)
-    member   = guild.get_role(MEMBER_ROLE_ID)
-    if not newcomer or not member:
-        return  # misconfigured IDs or missing roles
-
-    now = datetime.now(tz=TZ)
-
-    for m in guild.members:
-        # Must currently have Newcomer and not already have Member
-        if not (newcomer in m.roles and member not in m.roles):
-            continue
-
-        # joined_at can be None in rare cases; skip safely
-        if not m.joined_at:
-            continue
-
-        joined_local = m.joined_at.astimezone(TZ)
-        if now - joined_local >= PROMOTE_AFTER:
-            try:
-                # Give Member first (in case removing Newcomer fails)
-                await m.add_roles(member, reason="Auto-promotion after 3 days in server")
-                await m.remove_roles(newcomer, reason="Auto-promotion after 3 days in server")
-                # Optional: log it to your mod log channel
-                modlog = guild.get_channel(MOD_LOG_CHANNEL_ID)
-                if modlog:
-                    await modlog.send(f"✅ Auto-promoted {m.mention} to <@&{MEMBER_ROLE_ID}> (joined {joined_local:%Y-%m-%d %H:%M %Z}).")
-            except discord.Forbidden:
-                print("[promote] Missing permissions or role order prevents promotion.")
-            except Exception as e:
-                print(f"[promote] Unexpected error: {e}")
-
-def _today_key(now: datetime) -> str:
-    return now.strftime("%Y%m%d")
-
-async def _get_or_build_today_drop_schedule(now: datetime) -> dict:
-    """
-    Persisted JSON format: {"times":[unix,...], "created":[false,...]}
-    """
-    day_key = _today_key(now)
-    meta_key = f"drops_schedule:{day_key}"
-    raw = await db_get_meta(meta_key)
-    if raw:
-        try:
-            data = json.loads(raw)
-            if isinstance(data, dict) and "times" in data and "created" in data:
-                return data
-        except Exception:
-            pass
-
-    # Fresh schedule: choose 3 or 4 slots uniformly over [start, end)
-    start = datetime(now.year, now.month, now.day, tzinfo=TZ)
-    end   = start + timedelta(days=1)
-    count = random.choice([3, 4])
-    seconds = sorted(random.sample(range(int((end - start).total_seconds())), count))
-    times = [int(start.timestamp()) + s for s in seconds]
-    schedule = {"times": times, "created": [False]*count}
-    await db_set_meta(meta_key, json.dumps(schedule))
-    return schedule
-
-async def _mark_drop_created(now: datetime, schedule: dict, idx: int):
-    schedule["created"][idx] = True
-    meta_key = f"drops_schedule:{_today_key(now)}"
-    await db_set_meta(meta_key, json.dumps(schedule))
-
-@tasks.loop(seconds=45)
-async def drops_loop():
-    """Create drops only at the pre-scheduled random times of the current local day."""
-    guild = bot.get_guild(GUILD_ID)
-    if not guild:
-        return
-    ch = guild.get_channel(CASH_DROP_CHANNEL_ID)
-    if not ch:
-        return
-
-    # Ensure table exists
-    try:
-        await db_execute("""
-        CREATE TABLE IF NOT EXISTS muta_drops (
-            id BIGSERIAL PRIMARY KEY,
-            channel_id BIGINT NOT NULL,
-            message_id BIGINT NOT NULL UNIQUE,
-            phrase TEXT NOT NULL,
-            amount INTEGER NOT NULL,
-            claimed_by BIGINT,
-            claimed_at TIMESTAMPTZ,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        """)
-    except Exception:
-        return
-
-    now = datetime.now(tz=TZ)
-    schedule = await _get_or_build_today_drop_schedule(now)
-
-    # Fire any due, uncreated drops (one per tick)
-    for i, ts in enumerate(schedule["times"]):
-        if schedule["created"][i]:
-            continue
-        if time() >= ts:
-            phrase = four_words()
-            embed = discord.Embed(
-                title="[Cash] Cash drop!",
-                description=f"Type `!cash {phrase}` to collect **{DROP_AMOUNT}** cash!",
-                color=0x2ECC71
-            )
-            try:
-                msg = await ch.send(embed=embed)
-            except Exception:
-                return
-
-            try:
-                await db_execute("""
-                    INSERT INTO muta_drops(channel_id, message_id, phrase, amount, created_at)
-                    VALUES($1,$2,$3,$4, NOW())
-                """, CASH_DROP_CHANNEL_ID, msg.id, phrase.lower(), DROP_AMOUNT)
-                await _mark_drop_created(now, schedule, i)
-            except Exception:
-                try: await msg.delete()
-                except Exception: pass
-            finally:
-                break  # one per loop
-
-@tasks.loop(minutes=3)
-async def yt_poll_loop():
-    """
-    Fallback in case WebSub isn’t flowing; polls the channel feed and posts new uploads/Shorts.
-    """
-    guild = bot.get_guild(GUILD_ID)
-    if not guild:
-        return
-    ch = guild.get_channel(YT_ANNOUNCE_CHANNEL_ID)
-    role = guild.get_role(YT_PING_ROLE_ID)
-    if not ch or not role:
-        return
-
-    cache = load_yt_cache()
-    last_vid = cache.get("last_video_id")
-
-    feed_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={YT_CHANNEL_ID}"
-    try:
-        async with aiohttp.ClientSession(headers={"User-Agent":"Mozilla/5.0"}) as session:
-            async with session.get(feed_url, timeout=10) as resp:
-                if resp.status != 200:
-                    return
-                xml = await resp.text()
-        root = ET.fromstring(xml)
-        ns = {"atom":"http://www.w3.org/2005/Atom","yt":"http://www.youtube.com/xml/schemas/2015"}
-        entry = root.find("atom:entry", ns)
-        if entry is None:
-            return
-        vid = entry.findtext("yt:videoId", default="", namespaces=ns)
-        title = entry.findtext("atom:title", default="", namespaces=ns)
-        if not vid or vid == last_vid:
-            return
-
-        embed = discord.Embed(
-            title=title or "New upload!",
-            url=f"https://youtu.be/{vid}",
-            description=f"<@&{YT_PING_ROLE_ID}> Mutapapa just released a new video called: **{title or 'Untitled'}**\nClick to watch it!",
-            color=0xE62117
-        )
-        embed.set_image(url=f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg")
-        allowed = discord.AllowedMentions(roles=True, users=False, everyone=False)
-        await ch.send(embed=embed, allowed_mentions=allowed)
-        save_yt_cache({"last_video_id": vid})
-    except Exception as e:
-        print(f"[yt-poll] error: {e}")
-
-@tasks.loop(minutes=2)
-async def x_posts_loop():
-    """
-    Announce only brand-new tweets by storing the last tweet ID (RSS first, Nitter mirror fallback).
-    """
-   # After you compute title (tweet text) and x_link, and confirmed it's a *new* tweet_id:
-
-xp_role = bot.get_guild(GUILD_ID).get_role(X_PING_ROLE_ID)
-
-tweet_title = (title or "New post on X").strip()
-header  = f"**{tweet_title}**"
-tagline = f"{xp_role.mention} Mutapapa just posted something on X (Formerly Twitter)!  Click to check it out!"
-
-embed = discord.Embed(
-    title=tweet_title,
-    url=x_link,
-    description="",
-    color=0x1DA1F2
-)
-
-allowed = discord.AllowedMentions(roles=True, users=False, everyone=False)
-await ch.send(content=f"{header}\n\n{tagline}", embed=embed, allowed_mentions=allowed)
-save_x_cache({"last_tweet_id": tweet_id})  # or {"last_guid": guid} depending on your cache key
-
-    # 1) Try RSS first
-    feeds = [X_RSS_URL] + [u for u in X_RSS_FALLBACKS if u != X_RSS_URL]
-    try:
-        xml = None
-        async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
-            for url in feeds:
-                try:
-                    async with session.get(url, timeout=10) as resp:
-                        if resp.status == 200:
-                            xml = await resp.text()
-                            break
-                except Exception:
-                    pass
-
-        if xml:
-            try:
-                root = ET.fromstring(xml)
-                channel = root.find("./channel")
-                items = channel.findall("item") if channel is not None else []
-                if items:
-                    item = items[0]
-                    title = (item.findtext("title") or "").strip()
-                    link  = (item.findtext("link")  or "").strip()
-                    tweet_id = _extract_tweet_id(link)
-                    if tweet_id and tweet_id != last_tweet_id:
-                        x_link = nitter_to_x(link) if link else f"https://x.com/{X_USERNAME}/status/{tweet_id}"
-                        embed = discord.Embed(
-                            title=title or "New post on X",
-                            description="Mutapapa just posted something on X (Formerly Twitter)!  Click to check it out!",
-                            url=x_link,
-                            color=0x1DA1F2
-                        )
-                        await ch.send(embed=embed)
-                        save_x_cache({"last_tweet_id": tweet_id})
-                        return
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    # 2) Fallback: Nitter HTML via r.jina.ai — still only post if tweet_id changes
-    try:
-        mirror_url = f"https://r.jina.ai/http://nitter.net/{X_USERNAME}"
-        async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
-            async with session.get(mirror_url, timeout=10) as resp:
-                if resp.status != 200:
-                    return
-                text = await resp.text()
-    except Exception:
-        return
-
-    tweet_id = nitter_latest_id_from_html(text)
-    if not tweet_id or tweet_id == last_tweet_id:
-        return
-
-    x_link = f"https://x.com/{X_USERNAME}/status/{tweet_id}"
-    embed = discord.Embed(
-        title="New post on X",
-        description="Mutapapa just posted something on X (Formerly Twitter)!  Click to check it out!",
-        url=x_link,
-        color=0x1DA1F2
-    )
-    try:
-        await ch.send(embed=embed)
-        save_x_cache({"last_tweet_id": tweet_id})
-    except Exception:
-        pass
-
-@tasks.loop(minutes=1)
-async def monthly_reset_loop():
-    """Reset ONLY at the end of the month: last day 23:59 America/Edmonton."""
-    now = datetime.now(tz=TZ)
-    next_minute = now + timedelta(minutes=1)
-    if now.hour == 23 and now.minute == 59 and next_minute.day == 1:
-        print("[season] monthly reset running…")
-        rows = await leaderboard_top(10)
-        await monthly_reset()
-
-        try:
-            guild = bot.get_guild(GUILD_ID)
-            if guild:
-                desc = None
-                if rows:
-                    desc = "\n".join(
-                        f"**{idx}.** <@{r['user_id']}> — {r['cash']} cash"
-                        for idx, r in enumerate(rows, start=1)
-                    )
-                for cid in SEASON_RESET_ANNOUNCE_CHANNEL_IDS:
-                    ch = guild.get_channel(cid)
-                    if not ch:
-                        continue
-                    if desc:
-                        embed = discord.Embed(
-                            title="🏁 Season ended — Final Top 10",
-                            description=desc,
-                            color=0xF39C12
-                        )
-                        await ch.send(embed=embed)
-                    await ch.send("🧹 Balances reset. New season starts now — good luck!")
-        except Exception:
-            pass
-
 # ================== DISCORD EVENTS ==================
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} ({bot.user.id})")
     await db_init()
-    try:
-        await start_webserver()
-    except Exception as e:
-        print(f"[web] error: {e}")
+    await start_webserver()
+    yt_poll_loop.start()
+    x_posts_loop.start()
+    drops_loop.start()
+    monthly_reset_loop.start()
+    newcomer_promo_loop.start()
 
-    if not yt_poll_loop.is_running(): yt_poll_loop.start()
-    if not x_posts_loop.is_running():  x_posts_loop.start()
-    if not drops_loop.is_running():    drops_loop.start()
-    if not monthly_reset_loop.is_running(): monthly_reset_loop.start()
-    # NEW: start auto-promotion loop
-    if not newcomer_promote_loop.is_running(): newcomer_promote_loop.start()
-
-    base = os.getenv("WEB_PUBLIC_BASE_URL", "").strip()
-    if base:
-        try:
-            await websub_subscribe(base)
-        except Exception as e:
-            print(f"[yt-websub] subscribe error: {e}")
-
-@bot.event
-async def on_ready():
-    print(f"Logged in as {bot.user} ({bot.user.id})")
-
-    # init DB + webserver
-    await db_init()
-    try:
-        await start_webserver()
-    except Exception as e:
-        print(f"[web] error: {e}")
-
-    # Start background loops (idempotent)
-    if not yt_poll_loop.is_running():
-        yt_poll_loop.start()
-    if not x_posts_loop.is_running():
-        x_posts_loop.start()
-    if not drops_loop.is_running():
-        drops_loop.start()
-    if not monthly_reset_loop.is_running():
-        monthly_reset_loop.start()
-
-    # Optional: subscribe to WebSub if you have a public URL
-    base = os.getenv("WEB_PUBLIC_BASE_URL", "").strip()
-    if base:
-        try:
-            await websub_subscribe(base)
-        except Exception as e:
-            print(f"[yt-websub] subscribe error: {e}")
-
-# ================== MESSAGE HANDLING ==================
+# ------------------ HELP COMMANDS ------------------
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
@@ -1091,18 +747,19 @@ async def on_message(message: discord.Message):
         except Exception:
             pass
 
-    # HELP / COMMANDS
+    # HELP
     if clower in ("!commands", "!help"):
         await message.channel.send(embed=build_commands_embed(message.author))
         await delete_command_msg()
         return
 
-    # COMMANDS
+    # ping
     if clower == "!ping":
         await message.channel.send("pong 🏓")
         await delete_command_msg()
         return
 
+    # send as bot (admin)
     if clower.startswith("!send "):
         if not message.author.guild_permissions.administrator:
             await message.channel.send("❗ Admins only."); return
@@ -1113,6 +770,7 @@ async def on_message(message: discord.Message):
         await delete_command_msg()
         return
 
+    # reaction-role: create tracked message (admin)
     if clower.startswith("!sendreact "):
         if not message.author.guild_permissions.administrator:
             await message.channel.send("❗ Admins only."); return
@@ -1314,7 +972,7 @@ async def on_message(message: discord.Message):
         await delete_command_msg()
         return
 
-    # NON-COMMANDS
+    # ---------- NON-COMMANDS ----------
     # Counting channel enforcement
     if message.channel.id == COUNT_CHANNEL_ID and not message.author.bot:
         if content.startswith("!"):
@@ -1356,6 +1014,13 @@ async def on_message(message: discord.Message):
             print(f"[earn] error: {e}")
 
     # Cross-trade detector
+    BUY_SELL_WORDS = {"cross-trade","cross trade","blackmarket","bm","robux","paypal","venmo","crypto","btc","eth","real money","sell robux","buy robux","cashapp"}
+    CROSSTRADE_HINTS = {"dm me to buy","selling for cash","buying with cash","pay real money","outside discord"}
+    CROSSTRADE_PATTERNS = [
+        re.compile(r"sell(?:ing)?\s+\d+\s*robux", re.I),
+        re.compile(r"buy(?:ing)?\s+\d+\s*robux", re.I),
+        re.compile(r"\b(pp|paypal|btc|eth|cashapp|venmo)\b", re.I),
+    ]
     if message.channel.id != MOD_LOG_CHANNEL_ID:
         if (not MONITORED_CHANNEL_IDS) or (message.channel.id in MONITORED_CHANNEL_IDS):
             raw = content
@@ -1373,7 +1038,7 @@ async def on_message(message: discord.Message):
                     user_key = f"report_cool:{message.author.id}"
                     last_s = await db_get_meta(user_key)
                     last = float(last_s) if last_s else 0.0
-                    if nowt - last >= 120:  # 2 min throttle/user
+                    if nowt - last >= 120:
                         await db_set_meta(user_key, str(nowt))
                         modlog = message.guild.get_channel(MOD_LOG_CHANNEL_ID)
                         if modlog:
@@ -1446,48 +1111,287 @@ async def on_member_join(member: discord.Member):
         embed.set_image(url=BANNER_URL)
         await ch.send(embed=embed)
 
-# ================== REACTION ROLES ==================
-@bot.event
-async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
-    if payload.guild_id != GUILD_ID:
+# Auto-promote newcomer -> member after 3 days
+@tasks.loop(hours=6)
+async def newcomer_promo_loop():
+    guild = bot.get_guild(GUILD_ID)
+    if not guild:
         return
-    if payload.user_id == (bot.user.id if bot.user else 0):
+    newcomer = guild.get_role(NEWCOMER_ROLE_ID)
+    member_r = guild.get_role(MEMBER_ROLE_ID)
+    if not (newcomer and member_r):
         return
-    store = load_rr_store()
-    if payload.message_id != store.get("message_id") or payload.channel_id != store.get("channel_id"):
-        return
-    emoji = str(payload.emoji)
-    role_id = REACTION_ROLE_MAP.get(emoji)
-    if not role_id:
-        return
-    guild = bot.get_guild(payload.guild_id);  role = guild.get_role(role_id) if guild else None
-    member = guild.get_member(payload.user_id) if guild else None
-    if not (guild and role and member): return
-    try:
-        if role not in member.roles:
-            await member.add_roles(role, reason="Reaction role add")
-    except Exception as e:
-        print(f"[rr] add error: {e}")
+    now = datetime.now(tz=TZ)
+    for m in list(newcomer.members):
+        try:
+            joined = m.joined_at.astimezone(TZ) if m.joined_at else None
+            if joined and (now - joined) >= timedelta(days=3):
+                await m.remove_roles(newcomer, reason="Newcomer period ended (3d)")
+                if member_r not in m.roles:
+                    await m.add_roles(member_r, reason="Auto-promo after 3d")
+        except Exception as e:
+            print(f"[newcomer_promo] error for {m.id}: {e}")
 
-@bot.event
-async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
-    if payload.guild_id != GUILD_ID:
+# ================== RANDOM DROP SCHEDULER ==================
+def _today_key(now: datetime) -> str:
+    return now.strftime("%Y%m%d")
+
+async def _get_or_build_today_drop_schedule(now: datetime) -> dict:
+    """
+    Persisted JSON format:
+      {"times":[unix,...], "created":[false,...]}
+    """
+    day_key = _today_key(now)
+    meta_key = f"drops_schedule:{day_key}"
+    raw = await db_get_meta(meta_key)
+    if raw:
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict) and "times" in data and "created" in data:
+                return data
+        except Exception:
+            pass
+
+    # Fresh schedule: choose 3 or 4 slots uniformly over the day
+    start = datetime(now.year, now.month, now.day, tzinfo=TZ)
+    end   = start + timedelta(days=1)
+    count = random.choice([3, 4])
+    seconds = sorted(random.sample(range(int((end - start).total_seconds())), count))
+    times = [int(start.timestamp()) + s for s in seconds]
+    schedule = {"times": times, "created": [False]*count}
+    await db_set_meta(meta_key, json.dumps(schedule))
+    return schedule
+
+async def _mark_drop_created(now: datetime, schedule: dict, idx: int):
+    schedule["created"][idx] = True
+    meta_key = f"drops_schedule:{_today_key(now)}"
+    await db_set_meta(meta_key, json.dumps(schedule))
+
+@tasks.loop(seconds=45)
+async def drops_loop():
+    guild = bot.get_guild(GUILD_ID)
+    if not guild:
         return
-    store = load_rr_store()
-    if payload.message_id != store.get("message_id") or payload.channel_id != store.get("channel_id"):
+    ch = guild.get_channel(CASH_DROP_CHANNEL_ID)
+    if not ch:
         return
-    emoji = str(payload.emoji)
-    role_id = REACTION_ROLE_MAP.get(emoji)
-    if not role_id:
-        return
-    guild = bot.get_guild(payload.guild_id);  role = guild.get_role(role_id) if guild else None
-    member = guild.get_member(payload.user_id) if guild else None
-    if not (guild and role and member): return
+
     try:
-        if role in member.roles:
-            await member.remove_roles(role, reason="Reaction role remove")
+        await db_execute("""
+        CREATE TABLE IF NOT EXISTS muta_drops (
+            id BIGSERIAL PRIMARY KEY,
+            channel_id BIGINT NOT NULL,
+            message_id BIGINT NOT NULL UNIQUE,
+            phrase TEXT NOT NULL,
+            amount INTEGER NOT NULL,
+            claimed_by BIGINT,
+            claimed_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """)
+    except Exception:
+        return
+
+    now = datetime.now(tz=TZ)
+    schedule = await _get_or_build_today_drop_schedule(now)
+    if not schedule["times"]:
+        schedule = await _get_or_build_today_drop_schedule(now)
+
+    for i, ts in enumerate(schedule["times"]):
+        if schedule["created"][i]:
+            continue
+        if time() >= ts:
+            phrase = four_words()
+            embed = discord.Embed(
+                title="[Cash] Cash drop!",
+                description=f"Type `!cash {phrase}` to collect **{DROP_AMOUNT}** cash!",
+                color=0x2ECC71
+            )
+            try:
+                msg = await ch.send(embed=embed)
+            except Exception:
+                return
+
+            try:
+                await db_execute("""
+                    INSERT INTO muta_drops(channel_id, message_id, phrase, amount, created_at)
+                    VALUES($1,$2,$3,$4, NOW())
+                """, CASH_DROP_CHANNEL_ID, msg.id, phrase.lower(), DROP_AMOUNT)
+                await _mark_drop_created(now, schedule, i)
+            except Exception:
+                try: await msg.delete()
+                except Exception: pass
+            finally:
+                break  # one per tick
+
+# ================== YOUTUBE POLL FALLBACK ==================
+@tasks.loop(minutes=3)
+async def yt_poll_loop():
+    """Fallback in case WebSub isn’t flowing; polls the channel feed and posts new uploads/Shorts."""
+    guild = bot.get_guild(GUILD_ID)
+    if not guild:
+        return
+    ch = guild.get_channel(YT_ANNOUNCE_CHANNEL_ID)
+    role = guild.get_role(YT_PING_ROLE_ID)
+    if not ch or not role:
+        return
+
+    cache = load_yt_cache()
+    last_vid = cache.get("last_video_id")
+
+    feed_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={YT_CHANNEL_ID}"
+    try:
+        async with aiohttp.ClientSession(headers={"User-Agent":"Mozilla/5.0"}) as session:
+            async with session.get(feed_url, timeout=12) as resp:
+                if resp.status != 200:
+                    return
+                xml = await resp.text()
+        root = ET.fromstring(xml)
+        ns = {"atom":"http://www.w3.org/2005/Atom","yt":"http://www.youtube.com/xml/schemas/2015"}
+        entry = root.find("atom:entry", ns)
+        if entry is None:
+            return
+        vid = entry.findtext("yt:videoId", default="", namespaces=ns)
+        title = entry.findtext("atom:title", default="", namespaces=ns)
+        if not vid or vid == last_vid:
+            return
+
+        header  = f"**{title}**"
+        tagline = f"{role.mention} Mutapapa just released a new video called: **{title}** — Click to watch it!"
+        embed = discord.Embed(
+            title=title or "New upload!",
+            url=f"https://youtu.be/{vid}",
+            description="",
+            color=0xE62117
+        )
+        embed.set_image(url=f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg")
+        allowed = discord.AllowedMentions(roles=True, users=False, everyone=False)
+        await ch.send(content=f"{header}\n\n{tagline}", embed=embed, allowed_mentions=allowed)
+        save_yt_cache({"last_video_id": vid})
     except Exception as e:
-        print(f"[rr] remove error: {e}")
+        print(f"[yt-poll] error: {e}")
+
+# ================== X POSTS LOOP ==================
+@tasks.loop(minutes=2)
+async def x_posts_loop():
+    guild = bot.get_guild(GUILD_ID)
+    if not guild:
+        return
+    ch = guild.get_channel(X_ANNOUNCE_CHANNEL_ID)
+    role = guild.get_role(X_PING_ROLE_ID)
+    if not ch or not role:
+        return
+
+    cache = load_x_cache()
+    last_tweet_id = cache.get("last_tweet_id")
+
+    # 1) Try RSS first
+    feeds = [X_RSS_URL] + [u for u in X_RSS_FALLBACKS if u != X_RSS_URL]
+    try:
+        xml = None
+        async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
+            for url in feeds:
+                try:
+                    async with session.get(url, timeout=10) as resp:
+                        if resp.status == 200:
+                            xml = await resp.text()
+                            break
+                except Exception:
+                    pass
+
+        if xml:
+            try:
+                root = ET.fromstring(xml)
+                channel = root.find("./channel")
+                items = channel.findall("item") if channel is not None else []
+                if items:
+                    item = items[0]
+                    title = (item.findtext("title") or "").strip()
+                    link  = (item.findtext("link")  or "").strip()
+                    tweet_id = _extract_tweet_id(link)
+                    if tweet_id and tweet_id != last_tweet_id:
+                        x_link = nitter_to_x(link) if link else f"https://x.com/{X_USERNAME}/status/{tweet_id}"
+                        tweet_title = title or "New post on X"
+                        header  = f"**{tweet_title}**"
+                        tagline = f"{role.mention} Mutapapa just posted something on X (Formerly Twitter)!  Click to check it out!"
+                        embed = discord.Embed(
+                            title=tweet_title,
+                            url=x_link,
+                            description="",
+                            color=0x1DA1F2
+                        )
+                        allowed = discord.AllowedMentions(roles=True, users=False, everyone=False)
+                        await ch.send(content=f"{header}\n\n{tagline}", embed=embed, allowed_mentions=allowed)
+                        save_x_cache({"last_tweet_id": tweet_id})
+                        return
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # 2) Fallback: Nitter HTML via r.jina.ai — still only post if tweet_id changes
+    try:
+        mirror_url = f"https://r.jina.ai/http://nitter.net/{X_USERNAME}"
+        async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
+            async with session.get(mirror_url, timeout=10) as resp:
+                if resp.status != 200:
+                    return
+                text = await resp.text()
+    except Exception:
+        return
+
+    tweet_id = nitter_latest_id_from_html(text)
+    if not tweet_id or tweet_id == last_tweet_id:
+        return
+
+    x_link = f"https://x.com/{X_USERNAME}/status/{tweet_id}"
+    header  = "**New post on X**"
+    tagline = f"{role.mention} Mutapapa just posted something on X (Formerly Twitter)!  Click to check it out!"
+    embed = discord.Embed(
+        title="New post on X",
+        url=x_link,
+        description="",
+        color=0x1DA1F2
+    )
+    try:
+        allowed = discord.AllowedMentions(roles=True, users=False, everyone=False)
+        await ch.send(content=f"{header}\n\n{tagline}", embed=embed, allowed_mentions=allowed)
+        save_x_cache({"last_tweet_id": tweet_id})
+    except Exception:
+        pass
+
+# ================== MONTHLY RESET ==================
+@tasks.loop(minutes=1)
+async def monthly_reset_loop():
+    now = datetime.now(tz=TZ)
+    next_minute = now + timedelta(minutes=1)
+    if now.hour == 23 and now.minute == 59 and next_minute.day == 1:
+        print("[season] monthly reset running…")
+        rows = await leaderboard_top(10)
+        await monthly_reset()
+        try:
+            guild = bot.get_guild(GUILD_ID)
+            if guild:
+                desc = None
+                if rows:
+                    desc = "\n".join(
+                        f"**{idx}.** <@{r['user_id']}> — {r['cash']} cash"
+                        for idx, r in enumerate(rows, start=1)
+                    )
+                for cid in SEASON_RESET_ANNOUNCE_CHANNEL_IDS:
+                    ch = guild.get_channel(cid)
+                    if not ch:
+                        continue
+                    if desc:
+                        embed = discord.Embed(
+                            title="🏁 Season ended — Final Top 10",
+                            description=desc,
+                            color=0xF39C12
+                        )
+                        await ch.send(embed=embed)
+                    await ch.send("🧹 Balances reset. New season starts now — good luck!")
+        except Exception:
+            pass
 
 # ================== RUN ==================
 def main():
