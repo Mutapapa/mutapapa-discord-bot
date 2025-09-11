@@ -69,6 +69,13 @@ YT_CALLBACK_PATH       = "/yt/webhook"
 YT_HUB                 = "https://pubsubhubbub.appspot.com"
 YT_SECRET              = "mutapapa-youtube"  # keep in env ideally
 
+# YouTube ping role (Upload Ping)
+YT_PING_ROLE_ID = 1412989373556850829
+
+# X/Twitter ping role
+X_PING_ROLE_ID  = 1414001344297172992
+
+
 # X / Twitter via Nitter/Bridge
 X_USERNAME = "Real_Mutapapa"
 X_RSS_FALLBACKS = [
@@ -323,8 +330,8 @@ async def yt_webhook_handler(request: web.Request):
         entry = root.find("atom:entry", ns)
         if entry is None:
             return web.Response(text="no entry")
-        vid = entry.findtext("yt:videoId", default="", namespaces=ns)
-        title = entry.findtext("atom:title", default="", namespaces=ns)
+        vid   = entry.findtext("yt:videoId", default="", namespaces=ns)
+        title = entry.findtext("atom:title",   default="", namespaces=ns)
     except Exception as e:
         print(f"[yt-webhook] parse error: {e}")
         return web.Response(text="ok")
@@ -332,52 +339,24 @@ async def yt_webhook_handler(request: web.Request):
     if vid:
         guild = bot.get_guild(GUILD_ID)
         if guild:
-            ch = guild.get_channel(YT_ANNOUNCE_CHANNEL_ID)
+            ch   = guild.get_channel(YT_ANNOUNCE_CHANNEL_ID)
             role = guild.get_role(YT_PING_ROLE_ID)
             if ch and role:
+                # EXACT FORMAT:
+                header   = f"**{title}**"
+                tagline  = f"{role.mention} Mutapapa just released a new video called: **{title}** — Click to watch it!"
                 embed = discord.Embed(
                     title=title or "New upload!",
-                    url=f"https://youtu.be/{vid}",  # works for Shorts too
-                    description=f"{role.mention} Mutapapa just released a new video called: **{title or 'Untitled'}**\nClick to watch it!",
+                    url=f"https://youtu.be/{vid}",  # works for Shorts as well
+                    description="",
                     color=0xE62117
                 )
                 embed.set_image(url=f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg")
                 allowed = discord.AllowedMentions(roles=True, users=False, everyone=False)
-                await ch.send(embed=embed, allowed_mentions=allowed)
+                await ch.send(content=f"{header}\n\n{tagline}", embed=embed, allowed_mentions=allowed)
                 print(f"[yt-webhook] announced {vid}")
 
     return web.Response(text="ok")
-
-async def health(_):
-    return web.Response(text="ok")
-
-app.add_routes([
-    web.get(YT_CALLBACK_PATH, yt_webhook_handler),
-    web.post(YT_CALLBACK_PATH, yt_webhook_handler),
-    web.get("/health", health),
-])
-
-runner = web.AppRunner(app)
-
-async def start_webserver():
-    await runner.setup()
-    port = int(os.getenv("PORT", "8080"))
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-    print(f"[yt-webhook] listening on 0.0.0.0:{port}{YT_CALLBACK_PATH}")
-
-async def websub_subscribe(public_base_url: str):
-    topic = f"https://www.youtube.com/feeds/videos.xml?channel_id={YT_CHANNEL_ID}"
-    callback = f"{public_base_url.rstrip('/')}{YT_CALLBACK_PATH}"
-    data = {"hub.mode":"subscribe","hub.topic":topic,"hub.callback":callback,"hub.verify":"async"}
-    if YT_SECRET:
-        data["hub.secret"] = YT_SECRET
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(f"{YT_HUB}/subscribe", data=data, timeout=10) as resp:
-                print(f"[yt-websub] subscribe {resp.status} -> {callback}")
-    except Exception as e:
-        print(f"[yt-websub] subscribe error: {e}")
 
 # ================== GIVEAWAYS ==================
 class GiveawayView(View):
@@ -923,15 +902,24 @@ async def x_posts_loop():
     """
     Announce only brand-new tweets by storing the last tweet ID (RSS first, Nitter mirror fallback).
     """
-    guild = bot.get_guild(GUILD_ID)
-    if not guild:
-        return
-    ch = guild.get_channel(X_ANNOUNCE_CHANNEL_ID)
-    if not ch:
-        return
+   # After you compute title (tweet text) and x_link, and confirmed it's a *new* tweet_id:
 
-    cache = load_x_cache()
-    last_tweet_id = cache.get("last_tweet_id")
+xp_role = bot.get_guild(GUILD_ID).get_role(X_PING_ROLE_ID)
+
+tweet_title = (title or "New post on X").strip()
+header  = f"**{tweet_title}**"
+tagline = f"{xp_role.mention} Mutapapa just posted something on X (Formerly Twitter)!  Click to check it out!"
+
+embed = discord.Embed(
+    title=tweet_title,
+    url=x_link,
+    description="",
+    color=0x1DA1F2
+)
+
+allowed = discord.AllowedMentions(roles=True, users=False, everyone=False)
+await ch.send(content=f"{header}\n\n{tagline}", embed=embed, allowed_mentions=allowed)
+save_x_cache({"last_tweet_id": tweet_id})  # or {"last_guid": guid} depending on your cache key
 
     # 1) Try RSS first
     feeds = [X_RSS_URL] + [u for u in X_RSS_FALLBACKS if u != X_RSS_URL]
