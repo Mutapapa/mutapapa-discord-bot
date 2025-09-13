@@ -1506,3 +1506,29 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# --- keep your loop definitions above ---
+# e.g.:
+# @tasks.loop(minutes=5)
+# async def newcomer_promote_loop(): ...
+# @tasks.loop(seconds=45)
+# async def drops_loop(): ...
+# @tasks.loop(minutes=2)
+# async def x_posts_loop(): ...
+# @tasks.loop(minutes=3)
+# async def yt_poll_loop(): ...
+# @tasks.loop(minutes=1)
+# async def monthly_reset_loop(): ...
+
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user} ({bot.user.id})")
+
+    # init services that need the loop
+    await db_init()
+    await start_webserver()
+
+    # start background loops once
+    for loop_obj in (yt_poll_loop, x_posts_loop, drops_loop, monthly_reset_loop, newcomer_promote_loop):
+        if not loop_obj.is_running():
+            loop_obj.start()
