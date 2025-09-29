@@ -21,6 +21,223 @@ from discord.ext import tasks
 from discord.ui import View, button
 
 # ================== CORE CONFIG ==================
+import os
+import json
+import asyncio
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+import discord
+from discord.ext import commands, tasks
+
+ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
+TZ = ZoneInfo("America/Edmonton")
+
+def utc_now():
+    return datetime.now(timezone.utc)
+
+# ---------- GIVEAWAY CLAIMS COG ----------
+class ClaimFormModal(discord.ui.Modal, title="Giveaway Claim"):
+    def __init__(self, cog, claim_id: int):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.claim_id = claim_id
+
+        self.roblox_username = discord.ui.TextInput(
+            label="Roblox username", max_length=32, required=True
+        )
+        self.item_link = discord.ui.TextInput(
+            label="Item link (optional)", required=False, placeholder="https://…"
+        )
+        self.extra = discord.ui.TextInput(
+            label="Anything else",
+            required=False,
+            style=discord.TextStyle.paragraph,
+            max_length=500,
+            placeholder="Any details we should know"
+        )
+
+        self.add_item(self.roblox_username)
+        self.add_item(self.item_link)
+        self.add_item(self.extra)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        answers = {
+            "roblox_username": str(self.roblox_username.value).strip(),
+            "item_link": str(self.item_link.value).strip(),
+            "notes": str(self.extra.value).strip(),
+        }
+        # Save answers + set status=submitted
+        await self.cog._save_answers(self.claim_id, answers)
+        # Tell winner
+        await interaction.response.send_message(
+            "Thanks! I’ve sent your info to Mutapapa. You’ll get a DM once it’s paid. 🎉"
+        )
+        # Notify admin
+        await self.cog._dm_admin_with_claim(self.claim_id, answers)
+
+class ClaimStartView(discord.ui.View):
+    def __init__(self, cog, claim_id: int):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.claim_id = claim_id
+
+    @discord.ui.button(label="Open Claim Form", style=discord.ButtonStyle.primary)
+    async def open_form(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ClaimFormModal(self.cog, self.claim_id))
+
+class GiveawayClaims(commands.Cog):
+    def __init__(self, bot: commands.Bot, pool):
+        self.bot = bot
+        self.pool = pool
+        self._expiry_loop.start()
+
+    def cog_unload(self):
+        self._expiry_loop.cancel()
+
+    async def start_claim_for_winner(
+        self,
+        guild: discord.Guild,
+        winner: discord.abc.User,
+        giveaway_title: str,
+        announce_message: discord.Message | None,
+        fallback_channel: discord.TextChannel | None
+    ):
+        # Create DB row first
+        created = utc_now()
+        expires = (datetime.now(TZ) + timedelta(hours=24)).astimezone(timezone.utc)
+        rec = await self.pool.fetchrow(
+            """INSERT INTO muta_giveaway_claims(guild_id,giveaway_title,winner_id,expires_at)
+               VALUES($1,$2,$3,$4) RETURNING id""",
+            guild.id, giveaway_title, winner.id, expires
+        )
+        claim_id = rec["id"]
+
+        dm_text = (
+            f"Congrats, {winner.mention or winner.name}! You won **{giveaway_title}** 🎉\n\n"
+            "To claim within **24 hours**, type `claim` here *or* press the button below.\n"
+            "I’ll ask a couple quick questions, then I’ll DM Mutapapa."
+        )
+        try:
+            dm = await winner.send(dm_text, view=ClaimStartView(self, claim_id))
+            # Nice to have: pin or react to help visibility
+            try:
+                await dm.add_reaction("✅")
+            except Exception:
+                pass
+        except discord.Forbidden:
+            # DMs closed: add note in giveaway channel/message
+            if announce_message:
+                try:
+                    new_content = (
+                        announce_message.content +
+                        f"\n\n⚠️ <@{winner.id}> has DMs off. Please DM <@{ADMIN_USER_ID}> to claim within 24h."
+                    )
+                    await announce_message.edit(content=new_content)
+                except Exception:
+                    pass
+            elif fallback_channel:
+                await fallback_channel.send(
+                    f"⚠️ <@{winner.id}> I couldn’t DM you. Please DM <@{ADMIN_USER_ID}> "
+                    f"to claim **{giveaway_title}** within 24h."
+                )
+
+    @commands.Cog.listener("on_message")
+    async def _listen_for_claim_keyword(self, msg: discord.Message):
+        # Only react in DMs with winners that have 'pending' claims
+        if msg.author.bot or msg.guild is not None:
+            return
+        content = (msg.content or "").lower()
+        if "claim" not in content:
+            return
+        row = await self.pool.fetchrow(
+            """SELECT id, expires_at FROM muta_giveaway_claims
+               WHERE winner_id=$1 AND status='pending'
+               ORDER BY created_at DESC LIMIT 1""",
+            msg.author.id
+        )
+        if not row:
+            return
+        claim_id = row["id"]
+        # Offer the form
+        await msg.channel.send(
+            "Great! Tap the button to fill your claim form.", view=ClaimStartView(self, claim_id)
+        )
+
+    async def _save_answers(self, claim_id: int, answers: dict):
+        await self.pool.execute(
+            """UPDATE muta_giveaway_claims
+               SET answers=$2, status='submitted'
+               WHERE id=$1""",
+            claim_id, json.dumps(answers)
+        )
+
+    async def _dm_admin_with_claim(self, claim_id: int, answers: dict):
+        admin_user = self.bot.get_user(ADMIN_USER_ID) or await self.bot.fetch_user(ADMIN_USER_ID)
+        row = await self.pool.fetchrow(
+            "SELECT giveaway_title, winner_id FROM muta_giveaway_claims WHERE id=$1", claim_id
+        )
+        if not row:
+            return
+        title = row["giveaway_title"]
+        winner_id = row["winner_id"]
+        text = (
+            f"**Giveaway claim submitted** (ID `{claim_id}`)\n"
+            f"**Title:** {title}\n"
+            f"**Winner:** <@{winner_id}> (`{winner_id}`)\n"
+            f"**Roblox:** {answers.get('roblox_username')}\n"
+            f"**Item:** {answers.get('item_link') or '—'}\n"
+            f"**Notes:** {answers.get('notes') or '—'}\n\n"
+            f"Mark paid by replying here with: `!paid {claim_id} [note]`"
+        )
+        try:
+            await admin_user.send(text)
+        except Exception:
+            # Fail silently if admin DMs closed
+            pass
+
+    @commands.command(name="paid")
+    async def mark_paid(self, ctx: commands.Context, claim_id: int, *, note: str | None = None):
+        # Only admin (you) can run this, anywhere (DM or guild)
+        if ctx.author.id != ADMIN_USER_ID and not (getattr(ctx.author, "guild_permissions", None) and ctx.author.guild_permissions.administrator):
+            return await ctx.reply("You can’t use this.", delete_after=6)
+        row = await self.pool.fetchrow(
+            "UPDATE muta_giveaway_claims SET status='paid' WHERE id=$1 AND status IN('pending','submitted') RETURNING winner_id,giveaway_title",
+            claim_id
+        )
+        if not row:
+            return await ctx.reply("No such pending claim.", delete_after=6)
+
+        winner_id = row["winner_id"]
+        title = row["giveaway_title"]
+        # DM winner
+        try:
+            u = self.bot.get_user(winner_id) or await self.bot.fetch_user(winner_id)
+            msg = (
+                f"Your giveaway **{title}** has been **paid**. Check your pending Robux/thingy.\n"
+                f"If anything goes wrong, DM <@{ADMIN_USER_ID}>."
+            )
+            await u.send(msg)
+        except Exception:
+            pass
+
+        await ctx.reply(f"Marked claim `{claim_id}` as **paid**. {('Note: '+note) if note else ''}")
+
+    @tasks.loop(minutes=10)
+    async def _expiry_loop(self):
+        # expire any past-due claims
+        await self.pool.execute(
+            "UPDATE muta_giveaway_claims SET status='expired' WHERE status IN('pending','submitted') AND expires_at < NOW()"
+        )
+
+    @_expiry_loop.before_loop
+    async def _before_expiry_loop(self):
+        await self.bot.wait_until_ready()
+
+# Register cog at startup (after bot/pool exist)
+def setup_giveaway_claims(bot, pool):
+    if bot.get_cog("GiveawayClaims") is None:
+        bot.add_cog(GiveawayClaims(bot, pool))
+
 GUILD_ID = 1411205177880608831
 
 WELCOME_CHANNEL_ID = 1411946767414591538
@@ -217,6 +434,21 @@ intents.members = True
 bot = discord.Client(intents=intents)
 
 # ================== DB (Supabase Postgres via asyncpg) ==================
+# --- Giveaway claims table (24h claim flow) ---
+await pool.execute("""
+CREATE TABLE IF NOT EXISTS muta_giveaway_claims (
+  id BIGSERIAL PRIMARY KEY,
+  guild_id BIGINT NOT NULL,
+  giveaway_title TEXT NOT NULL,
+  winner_id BIGINT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending', -- pending|submitted|paid|expired
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  answers JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS idx_claims_winner_status ON muta_giveaway_claims(winner_id, status);
+""")
+
 DB_URL = os.getenv("SUPABASE_DB_URL", "").strip()
 if not DB_URL:
     raise RuntimeError("SUPABASE_DB_URL is missing. Provide a postgresql:// DSN (not the https REST URL).")
