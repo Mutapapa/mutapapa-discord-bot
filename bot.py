@@ -231,18 +231,20 @@ CREATE TABLE IF NOT EXISTS muta_meta (
 """)
         
         # users
-        await con.execute("""
-        CREATE TABLE IF NOT EXISTS muta_users (
-            user_id BIGINT PRIMARY KEY,
-@@ -235,12 +247,8 @@
-            today_earned BIGINT NOT NULL DEFAULT 0,
-            bug_rewards_this_month INTEGER NOT NULL DEFAULT 0,
-            activity_points BIGINT NOT NULL DEFAULT 0
-        );
-        """)
-        await con.execute("ALTER TABLE muta_users ADD COLUMN IF NOT EXISTS activity_points BIGINT NOT NULL DEFAULT 0;")
-        await con.execute("ALTER TABLE muta_users ADD COLUMN IF NOT EXISTS today_earned BIGINT NOT NULL DEFAULT 0;")
-        );""")
+            await con.execute("""
+    CREATE TABLE IF NOT EXISTS muta_users (
+        user_id BIGINT PRIMARY KEY,
+        cash BIGINT NOT NULL DEFAULT 0,
+        last_earn_ts TIMESTAMPTZ,
+        today_earned BIGINT NOT NULL DEFAULT 0,
+        bug_rewards_this_month INTEGER NOT NULL DEFAULT 0,
+        activity_points BIGINT NOT NULL DEFAULT 0
+    );
+    """)
+
+    await con.execute("ALTER TABLE muta_users ADD COLUMN IF NOT EXISTS activity_points BIGINT NOT NULL DEFAULT 0;")
+    await con.execute("ALTER TABLE muta_users ADD COLUMN IF NOT EXISTS today_earned BIGINT NOT NULL DEFAULT 0;")
+
 
         # drops
         await con.execute("""
