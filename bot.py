@@ -153,23 +153,6 @@ bot=commands.Bot(command_prefix="!",intents=intents)
 # ================== BUGREPORT & USER COMMANDS ==================
 # (bugreport, balance, leaderboard, cash)
 
-# ================== READY ==================
-@bot.event
-async def on_ready():
-    print(f"Ready as {bot.user}")
-    await db_init()
-    if not newcomer_promote_loop.is_running(): newcomer_promote_loop.start()
-    if not drops_loop.is_running(): drops_loop.start()
-    if not monthly_reset_loop.is_running(): monthly_reset_loop.start()
-    if not bot.get_cog("GiveawayClaims"): await setup_giveaway_claims(bot,_pool)
-
-# ================== RUN ==================
-def main():
-    t=os.getenv("DISCORD_TOKEN")
-    if not t: raise RuntimeError("DISCORD_TOKEN missing")
-    bot.run(t)
-
-if __name__=="__main__": main()
 # ================== ECONOMY & LEVELS ==================
 async def ensure_user(uid:int):
     await _pool.execute("INSERT INTO muta_users(user_id) VALUES($1) ON CONFLICT DO NOTHING",uid)
