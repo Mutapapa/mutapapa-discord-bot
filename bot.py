@@ -229,7 +229,7 @@ COUNT_STATE = load_count_state()
             value TEXT
         );
         """)
-        (;""")
+        ;""")
 
         # users
         await con.execute("""
