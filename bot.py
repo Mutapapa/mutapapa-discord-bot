@@ -550,6 +550,8 @@ async def cash(ctx,*,phrase:str=""):
     bal=await add_cash(ctx.author.id,row["amount"])
     await ctx.send(f"💸 {ctx.author.mention} claimed **{row['amount']}** cash! (bal: {bal})")
 
+# ... all commands, loops, etc. ...
+
 # ================== READY ==================
 @bot.event
 async def on_ready():
@@ -558,4 +560,14 @@ async def on_ready():
     if not newcomer_promote_loop.is_running(): newcomer_promote_loop.start()
     if not drops_loop.is_running(): drops_loop.start()
     if not monthly_reset_loop.is_running(): monthly_reset_loop.start()
-    if not bot.get_cog("GiveawayClaims"): await setup_giveaway_claims(bot,_pool)
+    if not bot.get_cog("GiveawayClaims"):
+        await setup_giveaway_claims(bot, _pool)
+
+# ================== RUN ==================
+def main():
+    t=os.getenv("DISCORD_TOKEN")
+    if not t: raise RuntimeError("DISCORD_TOKEN missing")
+    bot.run(t)
+
+if __name__=="__main__":
+    main()
