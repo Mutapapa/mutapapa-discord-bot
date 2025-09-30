@@ -224,13 +224,12 @@ COUNT_STATE = load_count_state()
     async with _pool.acquire() as con:
         # meta
         await con.execute("""
-        CREATE TABLE IF NOT EXISTS muta_meta (
-            key   TEXT PRIMARY KEY,
-            value TEXT
-        );
-        """)
-        ;""")
-
+CREATE TABLE IF NOT EXISTS muta_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+""")
+        
         # users
         await con.execute("""
         CREATE TABLE IF NOT EXISTS muta_users (
