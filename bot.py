@@ -238,11 +238,11 @@ async def addcash(ctx,member:discord.Member,amount:int,*reason):
     await add_cash(member.id,amount,reason=" ".join(reason))
     await ctx.reply(f"Added {amount} to {member.mention}"); await cleanup_message(ctx)
 
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def removecash(ctx,member:discord.Member,amount:int,*reason):
-    await add_cash(member.id,-amount,reason=" ".join(reason))
-    await ctx.reply(f"Removed {amount} from {member.mention}"); await cleanup_message(ctx)
+@bot.command(aliases=["balance","bal","cashme"])
+async def mycash(ctx):
+    bal = await get_balance(ctx.author.id)
+    await ctx.reply(f"{ctx.author.mention}, you have {bal} cash.")
+    await cleanup_message(ctx)
 
 @bot.command()
 @commands.has_permissions(administrator=True)
