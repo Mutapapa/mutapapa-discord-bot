@@ -145,7 +145,7 @@ ROLE_SQUAD       = 1414818303028891731
 ROLE_SPECIALIST  = 1414818845541138493
 @@ -144,13 +143,17 @@
     (ROLE_LEGEND,    400_000),
-]
+}
 
 # Roles that can see & use mod-only commands (plus anyone with Manage Messages)
 # Help embed: show mod section only if user has these roles or admin
